@@ -78,9 +78,14 @@ def loadS1Gamma0(dim_file, polarisation = 'VV'):
     
     # Load data
     data = gdal.Open('%s/Gamma0_%s.img'%(data_file,polarisation)).ReadAsArray()
-    
+        
     # Get mask (where backscatter is 0)
     mask = data == 0
+    
+    # Convert from natural units to dB
+    data[mask] = 1E-10 # -100 dB, prevents error messages in np.log10
+    data = 10 * np.log10(data)
+    data[mask] = 0
     
     return np.ma.array(data, mask = mask)
 
@@ -395,7 +400,7 @@ def deseasonalise(data, md, area = 200000.):
     
     data_95pc = scipy.ndimage.filters.percentile_filter(data, 95, size = (filter_size, filter_size))
     
-    data_deseasonalised = data / data_95pc   
+    data_deseasonalised = data - data_95pc # Following Reiche et al. 2017
     
     return data_deseasonalised
 
