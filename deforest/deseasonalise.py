@@ -288,7 +288,7 @@ def _createGdalDataset(md, data_out = None, filename = '', driver = 'MEM', dtype
     return ds
 
 
-def _reprojectImage(ds_source, ds_dest, md_source, md_dest):
+def _reprojectImage(ds_source, ds_dest, md_source, md_dest, nodatavalue = 0):
     '''
     Reprojects a source image to match the coordinates of a destination GDAL dataset.
     
@@ -297,7 +297,8 @@ def _reprojectImage(ds_source, ds_dest, md_source, md_dest):
         ds_dest: A gdal dataset from _createGdalDataset(), with destination coordinate reference system and extent.
         md_source: A metadata dictionary created by buildMetadataDictionary() representing the source image.
         md_dest: A metadata dictionary created by buildMetadataDictionary() representing the destination image.
-    
+        nodatavalue: New array is initalised to nodatavalue (default = 0). Optionally change this to another value. For example, set nodatavalue = 1 for a mask.
+        
     Returns:
         A GDAL array with resampled data
     '''
@@ -306,6 +307,9 @@ def _reprojectImage(ds_source, ds_dest, md_source, md_dest):
     
     proj_source = md_source['proj'].ExportToWkt()
     proj_dest = md_dest['proj'].ExportToWkt()
+    
+    # Set nodata value
+    ds_dest.GetRasterBand(1).SetNoDataValue(nodatavalue)
     
     # Reproject source into dest project coordinates
     gdal.ReprojectImage(ds_source, ds_dest, proj_source, proj_dest, gdal.GRA_NearestNeighbour)
@@ -326,7 +330,7 @@ def subset(data, md_source, md_dest, dtype = 3):
     
     ds_source = _createGdalDataset(md_source, data_out = data.mask, dtype = 1)
     ds_dest = _createGdalDataset(md_dest, dtype = 1)
-    mask_resampled = _reprojectImage(ds_source, ds_dest, md_source, md_dest)
+    mask_resampled = _reprojectImage(ds_source, ds_dest, md_source, md_dest, nodatavalue = 1) # No data values should be added to the mask
     
     return np.ma.array(data_resampled, mask = mask_resampled)
 
