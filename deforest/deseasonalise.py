@@ -271,7 +271,7 @@ def _createGdalDataset(md, data_out = None, filename = '', driver = 'MEM', dtype
         A GDAL dataset.
     '''
     from osgeo import gdal
-    
+       
     gdal_driver = gdal.GetDriverByName(driver)
     ds = gdal_driver.Create(filename, md['ncols'], md['nrows'], 1, dtype, options = options)
     ds.SetGeoTransform(md['geo_t'])
@@ -403,7 +403,10 @@ def deseasonalise(data, md, area = 200000.):
     
     filter_size = int(round((float(area) / (res ** 2)) ** 0.5,0))
     
-    data_95pc = scipy.ndimage.filters.percentile_filter(data, 95, size = (filter_size, filter_size))
+    #data_95pc = scipy.ndimage.filters.percentile_filter(data, 95, size = (filter_size, filter_size))
+    
+    # Test a global p95
+    data_95pc = np.percentile(data, 95)
     
     data_deseasonalised = data - data_95pc # Following Reiche et al. 2017
     
@@ -418,7 +421,7 @@ def main(infile, sensor, extent_dest, EPSG_dest, output_res, output_dir = os.get
     assert sensor == 'S1' or sensor == 'S2', "Specified sensor %s is invalid."%str(sensor)
     
     md_dest = buildMetadataDictionary(extent_dest, output_res, EPSG_dest)
-            
+              
     if sensor == 'S1':
         
         # Get source metadata
