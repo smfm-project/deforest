@@ -337,92 +337,51 @@ def subset(data, md_source, md_dest, dtype = 3):
 
                 
 
-    
-
-"""
-def _do_filter(window):
-    '''
-    Helper function to speed up deseasonalise
-    '''
-    
-    this_data = data_raw[window[0]:window[0]+1000, window[1]:window[1]+1000]
-    
-    return scipy.ndimage.filters.percentile_filter(this_data, 95, size = (filter_size, filter_size))
-"""
-    
-
-def deseasonalise(data, md, area = 200000.):
+def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentile = 95, area = 200000.):
     '''
     Deseasonalises an array by dividing pixels by the 95th percentile value in the vicinity of each pixel
     
     Args:
         data: A masked numpy array containing the data
-        res: Integer of resolution to be processed (i.e. 10 m, 20 m, or 60 m).         
-        area: Area in m^2 to determine the kernel size. This should be greater than the size of a deforestation event. Defaults to 200,000 m^2 (20 ha).
+        md: metadata dictionary
+        normalisation_type: Select one of 'none' (no normalisation), 'global' (subtract percentile of entire scene), or 'local' (subtract percentile from the area surrounding each pixel).
+        percentile: Data percentile to subtract, if normalisation_type == 'local' or 'global'. Defaults to 95%.
+        area: Area in m^2 to determine the kernel size if normalisation_type == 'local'. This should be greater than the size of a deforestation event. Defaults to 200,000 m^2 (20 ha).
     
     Returns:
         The deseasonalised numpy array
     
     '''
     
-    '''
-    global filter_size
-    global data_raw
+    assert normalisation_type in ['none','local','global'], "normalisation_type must be one of 'none', 'local' or 'global'. It was set to %s."%str(normalisation_type)  
     
-    filter_size = int(round((float(area) / (res ** 2)) ** 0.5,0))
+    # No normalisation
+    if normalisation_type == 'none':
+        data_percentile = 0.
     
-    data_raw = data.copy()
-        
-    shape = data_raw.shape
+    # Following Hamunyela et al. 2016
+    if normalisation_type == 'local':  
+        res = md['res']
+        filter_size = int(round((float(area) / (res ** 2)) ** 0.5,0))
+        data_percentile = scipy.ndimage.filters.percentile_filter(data, normalisation_percentile, size = (filter_size, filter_size))
     
-    # Divide each axis into blocks of 1000
-    y_range = range(0,shape[0],1000)
-    x_range = range(0,shape[1],1000)
+    # Following Reiche et al. 2017
+    if normalisation_type == 'global':
+        data_percentile = np.percentile(data, normalisation_percentile)
     
-    import itertools
-    inputs = list(itertools.product(y_range,x_range))
-    
-    pool = multiprocessing.Pool(processes = 40)
-            
-    output = pool.map(_do_filter,inputs)
-    
-    pool.close()
-    pool.join()
-    
-    data_out = data.copy()
-    i = -1
-    for y in y_range:
-        for x in x_range:
-            i=i+1
-            data_out.data[y:y+1000,x:x+1000] = output[i] # This crashes still because of indexing. Leave multiprocessing til later?
-
-    data_deseasonalised = data_out / data_95pc   
-    '''
-    
-    res = md['res']
-    
-    filter_size = int(round((float(area) / (res ** 2)) ** 0.5,0))
-    
-    #data_95pc = scipy.ndimage.filters.percentile_filter(data, 95, size = (filter_size, filter_size))
-    
-    # Test a global p95
-    #data_95pc = np.percentile(data, 95)
-    
-    # Test no normalisation
-    data_95pc = 0.
-    
-    data_deseasonalised = data - data_95pc # Following Reiche et al. 2017
+    data_deseasonalised = data - data_data_percentile 
     
     return data_deseasonalised
 
 
 
-def main(infile, sensor, extent_dest, EPSG_dest, output_res, output_dir = os.getcwd(), output_name = 'DESEASONALISED', S1_pol = 'VV', S2_res = 20):
+def main(infile, sensor, extent_dest, EPSG_dest, output_res, output_dir = os.getcwd(), output_name = 'DESEASONALISED', S1_pol = 'VV', S2_res = 20, normalisation_type = 'none', normalisation_percentile = 95):
     """
     """
     
     assert sensor == 'S1' or sensor == 'S2', "Specified sensor %s is invalid."%str(sensor)
-    
+    assert '_' not in output_name, "Sorry, output_name may not include the character '_'."
+        
     md_dest = buildMetadataDictionary(extent_dest, output_res, EPSG_dest)
               
     if sensor == 'S1':
@@ -440,7 +399,7 @@ def main(infile, sensor, extent_dest, EPSG_dest, output_res, output_dir = os.get
         data_resampled = subset(data, md_source, md_dest, dtype = 7)
 
         # Deseasonalise data
-        data_deseasonalised = deseasonalise(data_resampled, md_dest)        
+        data_deseasonalised = deseasonalise(data_resampled, md_dest, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile)        
                
         # Output data
         output_uid = '_'.join(infile.split('/')[-1][:-4].split('_')[-4:])
@@ -465,47 +424,17 @@ def main(infile, sensor, extent_dest, EPSG_dest, output_res, output_dir = os.get
         data_resampled = subset(data, md_source, md_dest, dtype = 7)
         
         # Deseasonalise data
-        data_deseasonalised = deseasonalise(data_resampled, md_dest)
+        data_deseasonalised = deseasonalise(data_resampled, md_dest, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile)
         
         # Output data
-        output_uid = ''.join(''.join(infile.split('/')[-1].split('_')).split('.'))
+        output_uid = ''.join((infile.split('/')[-1]).split('.'))
         output_filename = '%s/%s_%s_%s_%s_%s_%s.tif'%(output_dir, output_name, sensor, str(S2_res), date, output_uid, 'data')
         ds = _createGdalDataset(md_dest, data_out = data_deseasonalised.data, filename = output_filename, driver='GTiff', dtype=7, options=['COMPRESS=LZW'])
 
         output_filename = '%s/%s_%s_%s_%s_%s.tif'%(output_dir, output_name, sensor, str(S2_res), date, output_uid, 'mask')
         ds = _createGdalDataset(md_dest, data_out = data_deseasonalised.mask, filename = output_filename, driver='GTiff', dtype=1, options=['COMPRESS=LZW'])
 
-    """
-    S1_data = '/home/sbowers3/DATA/testing/S1_processed_20161123_031538_031628_003080_0053D4.dim'
-    S2_data = '/home/sbowers3/DATA/testing/S2B_MSIL2A_20170630T072949_N0205_R049_T36KXE_20170630T074249.SAFE/GRANULE/L2A_T36KXE_A001648_20170630T074249/'
-    
-    S1_pol = 'VV'     
-    S2_res = 20
-    
-    EPSG_dest = 32736
-    res = 20.
-    extent_dest = [600000, 7900000, 700000, 8000000]
-     
-    # Build output metadata dictionary
-    md_dest = buildMetadataDictionary(extent_dest, res, EPSG_dest)
-     
-    # Build input metadata dictionaries
-    S1_extent, S1_EPSG, S1_res = getS1Metadata(S1_data, polarisation = S1_pol)
-    S2_extent, S2_EPSG = getS2Metadata(S2_data, resolution = S2_res)
-    md_S1 = buildMetadataDictionary(S1_extent, S1_res, S1_EPSG)
-    md_S2 = buildMetadataDictionary(S2_extent, S2_res, S2_EPSG)
-     
-    # Get data
-    vv = loadS1Gamma0(S1_data, polarisation = 'VV')
-    ndvi = loadS2NDVI(S2_data, S2_res)
-     
-    # Subset data
-    vv_resampled = subset(vv, md_S1, md_dest, dtype = 7)
-    ndvi_resampled = subset(ndvi, md_S2, md_dest, dtype = 7)
-    
-    ndvi_des = deseasonalise(ndvi_resampled, md_dest)
-    vv_des = deseasonalise(vv_resampled, md_dest)
-    """
+
 
 if __name__ == '__main__':
     '''
@@ -526,6 +455,8 @@ if __name__ == '__main__':
     required.add_argument('-r', '--resolution', type=float, metavar = 'RES', help="Output resolution in m.")
     
     # Optional arguments
+    optional.add_argument('-nt', '--normalisation_type', type=str, metavar = 'STR', default = 'none', help="Normalisation type. Set to one of 'none', 'local' or 'global'. Defaults to 'none'.")
+    optional.add_argument('-np', '--normalisation_percentile', type=float, metavar = 'N', default = 95, help="Normalisation percentile, in case where normalisation type set to  'local' or 'global'. Defaults to 95%.")
     optional.add_argument('-o', '--output_dir', type=str, metavar = 'DIR', default = os.getcwd(), help="Optionally specify an output directory. If nothing specified, downloads will output to the present working directory, given a standard filename.")
     optional.add_argument('-n', '--output_name', type=str, metavar = 'NAME', default = 'S1_output', help="Optionally specify a string to precede output filename.")
     optional.add_argument('-i', '--S2resolution', type=int, metavar = 'RES', default = 20, help="Optionally specify an input resolution for Sentinel-2 data (10, 20, or 60). Defaults to 20 m.")
@@ -540,4 +471,4 @@ if __name__ == '__main__':
     for infile in args.infiles:
         
         # Execute script
-        main(infile, args.sensor, args.target_extent, args.epsg, args.resolution, output_dir = args.output_dir, output_name = args.output_name, S1_pol = args.polarisation, S2_res = args.S2resolution,)
+        main(infile, args.sensor, args.target_extent, args.epsg, args.resolution, output_dir = args.output_dir, output_name = args.output_name, S1_pol = args.polarisation, S2_res = args.S2resolution, )
