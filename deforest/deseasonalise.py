@@ -309,6 +309,7 @@ def _reprojectImage(ds_source, ds_dest, md_source, md_dest, nodatavalue = 0):
     proj_dest = md_dest['proj'].ExportToWkt()
     
     # Set nodata value
+    ds_dest.GetRasterBand(1).Fill(nodatavalue)
     ds_dest.GetRasterBand(1).SetNoDataValue(nodatavalue)
     
     # Reproject source into dest project coordinates
