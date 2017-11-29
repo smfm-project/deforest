@@ -406,7 +406,10 @@ def deseasonalise(data, md, area = 200000.):
     #data_95pc = scipy.ndimage.filters.percentile_filter(data, 95, size = (filter_size, filter_size))
     
     # Test a global p95
-    data_95pc = np.percentile(data, 95)
+    #data_95pc = np.percentile(data, 95)
+    
+    # Test no normalisation
+    data_95pc = 0.
     
     data_deseasonalised = data - data_95pc # Following Reiche et al. 2017
     
