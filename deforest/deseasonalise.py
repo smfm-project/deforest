@@ -363,11 +363,14 @@ def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentil
     if normalisation_type == 'local':  
         res = md['res']
         filter_size = int(round((float(area) / (res ** 2)) ** 0.5,0))
+        # TODO: Is ndimage aware of masked arrays?
         data_percentile = scipy.ndimage.filters.percentile_filter(data, normalisation_percentile, size = (filter_size, filter_size))
     
     # Following Reiche et al. 2017
     if normalisation_type == 'global':
-        data_percentile = np.percentile(data, normalisation_percentile)
+        import pdb
+        pdb.set_trace()
+        data_percentile = np.percentile(data.data[data.mask==False], normalisation_percentile)
     
     data_deseasonalised = data - data_percentile 
     
