@@ -456,7 +456,7 @@ if __name__ == '__main__':
     
     # Optional arguments
     optional.add_argument('-nt', '--normalisation_type', type=str, metavar = 'STR', default = 'none', help="Normalisation type. Set to one of 'none', 'local' or 'global'. Defaults to 'none'.")
-    optional.add_argument('-np', '--normalisation_percentile', type=float, metavar = 'N', default = 95, help="Normalisation percentile, in case where normalisation type set to  'local' or 'global'. Defaults to 95%.")
+    optional.add_argument('-np', '--normalisation_percentile', type=int, metavar = 'N', default = 95, help="Normalisation percentile, in case where normalisation type set to  'local' or 'global'. Defaults to 95%.")
     optional.add_argument('-o', '--output_dir', type=str, metavar = 'DIR', default = os.getcwd(), help="Optionally specify an output directory. If nothing specified, downloads will output to the present working directory, given a standard filename.")
     optional.add_argument('-n', '--output_name', type=str, metavar = 'NAME', default = 'S1_output', help="Optionally specify a string to precede output filename.")
     optional.add_argument('-i', '--S2resolution', type=int, metavar = 'RES', default = 20, help="Optionally specify an input resolution for Sentinel-2 data (10, 20, or 60). Defaults to 20 m.")
@@ -471,4 +471,4 @@ if __name__ == '__main__':
     for infile in args.infiles:
         
         # Execute script
-        main(infile, args.sensor, args.target_extent, args.epsg, args.resolution, output_dir = args.output_dir, output_name = args.output_name, S1_pol = args.polarisation, S2_res = args.S2resolution, )
+        main(infile, args.sensor, args.target_extent, args.epsg, args.resolution, output_dir = args.output_dir, output_name = args.output_name, S1_pol = args.polarisation, S2_res = args.S2resolution, normalisation_type = args.normalisation_type, normalisation_percentile = args.normalisation_percentile)
