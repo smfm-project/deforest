@@ -368,8 +368,7 @@ def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentil
     
     # Following Reiche et al. 2017
     if normalisation_type == 'global':
-        import pdb
-        pdb.set_trace()
+        
         data_percentile = np.percentile(data.data[data.mask==False], normalisation_percentile)
     
     data_deseasonalised = data - data_percentile 
