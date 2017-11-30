@@ -7,7 +7,7 @@ import multiprocessing
 import numpy as np
 import os
 from osgeo import gdal
-import scipy.ndimage.filters
+import scipy.ndimage
 import xml.etree.ElementTree as ET
 
 import pdb
@@ -360,17 +360,28 @@ def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentil
         data_percentile = 0.
     
     # Following Hamunyela et al. 2016
-    if normalisation_type == 'local':  
+    if normalisation_type == 'local':
+        
+        # Fill in data gaps with nearest valid pixel (percentile_filter doesn't understand masked arrays)
+        ind = scipy.ndimage.distance_transform_edt(data.mask, return_distances = False, return_indices = True)
+        data_percentile = data.data[tuple(ind)]
+        
+        # Calcualte filter size
         res = md['res']
         filter_size = int(round((float(area) / (res ** 2)) ** 0.5,0))
-        # TODO: Is ndimage aware of masked arrays?
-        data_percentile = scipy.ndimage.filters.percentile_filter(data, normalisation_percentile, size = (filter_size, filter_size))
-    
+        
+        # Filter by percentile
+        data_percentile = scipy.ndimage.filters.percentile_filter(data_percentile, normalisation_percentile, size = (filter_size, filter_size))
+        
+        # Replace the mask
+        data_percentile = np.ma.array(data_percentile, mask = data.mask)
+        
     # Following Reiche et al. 2017
     if normalisation_type == 'global':
         
         data_percentile = np.percentile(data.data[data.mask==False], normalisation_percentile)
     
+    # And subtract the seasonal effect from the array
     data_deseasonalised = data - data_percentile 
     
     return data_deseasonalised
