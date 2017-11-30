@@ -433,7 +433,7 @@ def main(infile, sensor, extent_dest, EPSG_dest, output_res, output_dir = os.get
         output_filename = '%s/%s_%s_%s_%s_%s_%s.tif'%(output_dir, output_name, sensor, str(S2_res), date, output_uid, 'data')
         ds = _createGdalDataset(md_dest, data_out = data_deseasonalised.data, filename = output_filename, driver='GTiff', dtype=7, options=['COMPRESS=LZW'])
 
-        output_filename = '%s/%s_%s_%s_%s_%s.tif'%(output_dir, output_name, sensor, str(S2_res), date, output_uid, 'mask')
+        output_filename = '%s/%s_%s_%s_%s_%s_%s.tif'%(output_dir, output_name, sensor, str(S2_res), date, output_uid, 'mask')
         ds = _createGdalDataset(md_dest, data_out = data_deseasonalised.mask, filename = output_filename, driver='GTiff', dtype=1, options=['COMPRESS=LZW'])
 
 
