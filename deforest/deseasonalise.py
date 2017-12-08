@@ -274,8 +274,12 @@ def _createGdalDataset(md, data_out = None, filename = '', driver = 'MEM', dtype
        
     gdal_driver = gdal.GetDriverByName(driver)
     ds = gdal_driver.Create(filename, md['ncols'], md['nrows'], 1, dtype, options = options)
+    
     ds.SetGeoTransform(md['geo_t'])
-    ds.SetProjection(md['proj'].ExportToWkt())
+    
+    proj = osr.SpatialReference()
+    proj.ImportFromEPSG(md['EPSG'])
+    ds.SetProjection(proj.ExportToWkt())
        
     # If a data array specified, add it to the gdal dataset
     if type(data_out).__module__ == np.__name__:
@@ -381,7 +385,7 @@ def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentil
         
         data_percentile = np.percentile(data.data[data.mask==False], normalisation_percentile)
     
-    # And subtract the seasonal effect from the array
+    # And subtract the seasqnal effect from the array
     data_deseasonalised = data - data_percentile 
     
     return data_deseasonalised
