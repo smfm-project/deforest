@@ -270,7 +270,7 @@ def _createGdalDataset(md, data_out = None, filename = '', driver = 'MEM', dtype
     Returns:
         A GDAL dataset.
     '''
-    from osgeo import gdal
+    from osgeo import gdal, osr
        
     gdal_driver = gdal.GetDriverByName(driver)
     ds = gdal_driver.Create(filename, md['ncols'], md['nrows'], 1, dtype, options = options)
