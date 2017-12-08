@@ -412,11 +412,11 @@ def main(infile, sensor, extent_dest, EPSG_dest, output_res, output_dir = os.get
         # Load data
         data = loadS1Gamma0(infile, polarisation = S1_pol)
 
-        # Resample data
-        data_resampled = subset(data, md_source, md_dest, dtype = 7)
-
         # Deseasonalise data
-        data_deseasonalised = deseasonalise(data_resampled, md_dest, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile)        
+        data_deseasonalised = deseasonalise(data, md_source, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile)
+
+        # Resample data
+        data_resampled = subset(data_deseasonalised, md_source, md_dest, dtype = 7)
                
         # Output data
         output_uid = '_'.join(infile.split('/')[-1][:-4].split('_')[-4:])
@@ -436,12 +436,12 @@ def main(infile, sensor, extent_dest, EPSG_dest, output_res, output_dir = os.get
         
         # Load data
         data = loadS2NDVI(infile, S2_res)
-
-        # Resample data
-        data_resampled = subset(data, md_source, md_dest, dtype = 7)
         
         # Deseasonalise data
-        data_deseasonalised = deseasonalise(data_resampled, md_dest, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile)
+        data_deseasonalised = deseasonalise(data, md_source, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile)
+        
+        # Resample data
+        data_resampled = subset(data_deseasonalised, md_source, md_dest, dtype = 7)
         
         # Output data
         output_uid = ''.join((infile.split('/')[-1]).split('.'))
@@ -465,7 +465,7 @@ if __name__ == '__main__':
     optional = parser.add_argument_group('optional arguments')
 
     # Required arguments
-    required.add_argument('infiles', metavar = 'FILES', type = str, nargs = '+', help = 'Sentinel-1 processed input files in .dim format or a Sentinel-2 granule. Specify a valid S1/S2 input file or multiple files through wildcards (e.g. PATH/TO/*.dim, PATH/TO/GRANULE/*/).')
+    required.add_argument('infiles', metavar = 'FILES', type = str, nargs = '+', help = 'Sentinel-1 processed input files in .dim format or a Sentinel-2 granule. Specify a valid S1/S2 input file or multiple files through wildcards (e.g. PATH/TO/*.dim, PATH/TO.SAFE/GRANULE/*/).')
     required.add_argument('-s', '--sensor', metavar = 'SENSOR', type = str, help = 'The name of the sensor to be processed (S1 or S2)')
     required.add_argument('-te', '--target_extent', nargs = 4, metavar = ('XMIN', 'YMIN', 'XMAX', 'YMAX'), type = float, help = "Extent of output image tile, in format <xmin, ymin, xmax, ymax>.")
     required.add_argument('-e', '--epsg', type=int, metavar = 'EPSG', help="EPSG code for output image tile CRS. This must be UTM. Find the EPSG code of your output CRS as https://www.epsg-registry.org/.")
