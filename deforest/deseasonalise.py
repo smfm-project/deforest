@@ -417,14 +417,17 @@ def main(infile, sensor, extent_dest, EPSG_dest, output_res, output_dir = os.get
 
         # Resample data
         data_resampled = subset(data_deseasonalised, md_source, md_dest, dtype = 7)
-               
+        
+        import pdb
+        pdb.set_trace()
+        
         # Output data
         output_uid = '_'.join(infile.split('/')[-1][:-4].split('_')[-4:])
         output_filename = '%s/%s_%s_%s_%s_%s_%s.tif'%(output_dir, output_name, sensor, S1_pol, date, output_uid, 'data')       
-        ds = _createGdalDataset(md_dest, data_out = data_deseasonalised.data, filename = output_filename, driver='GTiff', dtype=7, options=['COMPRESS=LZW'])
+        ds = _createGdalDataset(md_dest, data_out = data_resampled.data, filename = output_filename, driver='GTiff', dtype=7, options=['COMPRESS=LZW'])
 
         output_filename = '%s/%s_%s_%s_%s_%s_%s.tif'%(output_dir, output_name, sensor, S1_pol, date, output_uid, 'mask')
-        ds = _createGdalDataset(md_dest, data_out = data_deseasonalised.mask, filename = output_filename, driver='GTiff', dtype=1, options=['COMPRESS=LZW'])
+        ds = _createGdalDataset(md_dest, data_out = data_resampled.mask, filename = output_filename, driver='GTiff', dtype=1, options=['COMPRESS=LZW'])
         
     if sensor == 'S2':
         
@@ -446,10 +449,10 @@ def main(infile, sensor, extent_dest, EPSG_dest, output_res, output_dir = os.get
         # Output data
         output_uid = ''.join((infile.split('/')[-1]).split('.'))
         output_filename = '%s/%s_%s_%s_%s_%s_%s.tif'%(output_dir, output_name, sensor, str(S2_res), date, output_uid, 'data')
-        ds = _createGdalDataset(md_dest, data_out = data_deseasonalised.data, filename = output_filename, driver='GTiff', dtype=7, options=['COMPRESS=LZW'])
+        ds = _createGdalDataset(md_dest, data_out = data_resampled.data, filename = output_filename, driver='GTiff', dtype=7, options=['COMPRESS=LZW'])
 
         output_filename = '%s/%s_%s_%s_%s_%s_%s.tif'%(output_dir, output_name, sensor, str(S2_res), date, output_uid, 'mask')
-        ds = _createGdalDataset(md_dest, data_out = data_deseasonalised.mask, filename = output_filename, driver='GTiff', dtype=1, options=['COMPRESS=LZW'])
+        ds = _createGdalDataset(md_dest, data_out = data_resampled.mask, filename = output_filename, driver='GTiff', dtype=1, options=['COMPRESS=LZW'])
 
 
 
