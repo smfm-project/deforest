@@ -278,7 +278,7 @@ def _createGdalDataset(md, data_out = None, filename = '', driver = 'MEM', dtype
     ds.SetGeoTransform(md['geo_t'])
     
     proj = osr.SpatialReference()
-    proj.ImportFromEPSG(md['EPSG'])
+    proj.ImportFromEPSG(md['EPSG_code'])
     ds.SetProjection(proj.ExportToWkt())
        
     # If a data array specified, add it to the gdal dataset
