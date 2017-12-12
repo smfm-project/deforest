@@ -165,18 +165,16 @@ def rasterizeShapefile(ds, shp, landcover):
 ##############
 
 
-data_dir = '/home/sbowers3/DATA/chimanimani/test_data/'
-shp = '/home/sbowers3/Documents/SMFM/chimanimani/training_areas.shp'
+data_dir = '/home/sbowers3/scratch/chimanimani/L3_files/'
+shp = '/home/sbowers3/Documents/chimanimani/training_areas/training_areas.shp'
 
 # Load each image in turn, and calculate the probability of forest (from a start point of everything being forest)
 
 data_files = glob.glob(data_dir + 'chimanimaniGlobal*S2*_data.tif')
-data_files.sort(key = lambda x: x.split('_')[3])
+data_files.sort(key = lambda x: x.split('_')[4])
 data_files = np.array(data_files)
 
-mask_files = glob.glob(data_dir + 'chimanimaniGlobal*S2*_mask.tif')
-mask_files.sort(key = lambda x: x.split('_')[3])
-mask_files = np.array(mask_files)
+mask_files = np.array([i[:-8] + 'mask.tif' for i in data_files])
 
 datestrings = [x.split('/')[-1].split('_')[3] for x in data_files]
 dates = np.array([dt.date(int(x[:4]), int(x[4:6]), int(x[6:])) for x in datestrings])
@@ -191,6 +189,11 @@ nonforest = []
 # Get unique dates
 for data_file, mask_file, date, sensor in zip(data_files, mask_files, dates, sensors):
     
+    if date >= dt.date(2017,1,1):
+        continue
+    
+    m = date.month
+    
     # Load file    
     print 'Loading %s'%data_file
     data = gdal.Open(data_file,0).ReadAsArray()
@@ -203,7 +206,7 @@ for data_file, mask_file, date, sensor in zip(data_files, mask_files, dates, sen
     
     pixels = rasterizeShapefile(gdal.Open(data_files[0]), shp, 'woodland')
     forest += list(data[np.logical_and(pixels, mask == False)])
-
+    
     pixels = rasterizeShapefile(gdal.Open(data_files[0]), shp, 'agriculture')
     nonforest += list(data[np.logical_and(pixels, mask == False)])
     
@@ -214,15 +217,15 @@ for data_file, mask_file, date, sensor in zip(data_files, mask_files, dates, sen
     nonforest += list(data[np.logical_and(pixels, mask == False)])   
     
 
-x = np.linspace(-10, 4.5, 1000)
-#x = np.linspace(-1, 1, 1000)
+#x = np.linspace(-10, 4.5, 1000)
+x = np.linspace(-1, 1, 1000)
 
 plt.hist(forest,normed=True, bins = 25, alpha = 0.5, label = 'Forest', color = 'green')
 forest_mu, forest_std = scipy.stats.norm.fit(forest)
 p = scipy.stats.norm.pdf(x, forest_mu, forest_std)
 plt.plot(x, p, 'green', linewidth=2)
 
-plt.hist(nonforest,normed=True, bins =25, alpha = 0.5, label = 'Nonforest', color = 'orange')
+plt.hist(nonforest,normed=True, bins = 25, alpha = 0.5, label = 'Nonforest', color = 'orange')
 nonforest_mu, nonforest_std = scipy.stats.norm.fit(nonforest)
 p = scipy.stats.norm.pdf(x, nonforest_mu, nonforest_std)
 plt.plot(x, p, 'orange', linewidth=2)
@@ -230,3 +233,22 @@ plt.plot(x, p, 'orange', linewidth=2)
 plt.legend()
 plt.show()
 
+"""
+# Plot variation
+def rgb2hex(r, g, b):
+    return '#{:02x}{:02x}{:02x}'.format(int(r*255), int(g*255), int(b*255))
+
+mu_list = []
+std_list = []
+
+cmap = plt.cm.get_cmap('Spectral')
+for m in range(12):
+    mu, std = scipy.stats.norm.fit(forest[m])
+    mu_list.append(mu)
+    std_list.append(std)
+    p = scipy.stats.norm.pdf(x, mu, std)
+    RGB = cmap(float(m)/11.)
+    plt.plot(x, p, rgb2hex(RGB[0],RGB[1],RGB[2]), linewidth=2)
+
+plt.show()
+"""
