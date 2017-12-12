@@ -87,19 +87,28 @@ def combineObservations(probability, mask):
 # Load each image in turn, and calculate the probability of forest (from a start point of everything being forest)
 
 
-data_files = glob.glob('/exports/csce/eddie/geos/groups/guasha/sbowers3/gorongosa/L3_files/gorongosaLocal*S1*_data.tif')
-data_files.sort(key = lambda x: x.split('_')[3])
+data_files = glob.glob('/exports/eddie/scratch/sbowers3/chimanimani/L3_files/chimanimaniGlobal*S1*_data.tif')
+data_files.sort(key = lambda x: x.split('_')[4])
 data_files = np.array(data_files)
 
-mask_files = glob.glob('/exports/csce/eddie/geos/groups/guasha/sbowers3/gorongosa/L3_files/gorongosaLocal*S1*_mask.tif')
-mask_files.sort(key = lambda x: x.split('_')[3])
+mask_files = glob.glob('/exports/eddie/scratch/sbowers3/chimanimani/L3_files/chimanimaniGlobal*S1*_mask.tif')
+mask_files.sort(key = lambda x: x.split('_')[4])
 mask_files = np.array(mask_files)
 
 datestrings = [x.split('/')[-1].split('_')[3] for x in data_files]
 dates = np.array([dt.date(int(x[:4]), int(x[4:6]), int(x[6:])) for x in datestrings])
 
 sensors = np.array([x.split('/')[-1].split('_')[1] for x in data_files])
+pols = np.array([x.split('/')[-1].split('_')[2] for x in data_files])
 
+# Get selection that removes VV S1 files where a VH file exists
+sel = np.logical_and(np.in1d(dates,np.intersect1d(dates[pols == 'VH'],dates[pols == 'VV'])), pols == 'VV') == False
+
+data_files = data_files[sel]
+mask_files = mask_files[sel]
+dates = dates[sel]
+sensors = sensors[sel]
+pols = pols[sel]
 
 # Initialise arrays
 deforestation = np.zeros_like(gdal.Open(data_files[0]).ReadAsArray(), dtype=np.bool)
@@ -114,23 +123,30 @@ pchange = np.zeros_like(deforestation, dtype=np.float)
 for date in sorted(np.unique(dates)):
     
     sensor = sensors[dates == date]
-        
+    pol = pols[dates == date]    
+
     F_mean = np.zeros_like(sensors[dates == date], dtype = np.float64)
     F_sd = np.zeros_like(F_mean)
     NF_mean = np.zeros_like(F_mean)
     NF_sd = np.zeros_like(F_mean)
     
-    # Sentinel-1
-    F_mean[sensor=='S1'] = -0.81#-7.
-    F_sd[sensor=='S1'] = 0.94#0.75
-    NF_mean[sensor=='S1'] = -4.38#-11.5
-    NF_sd[sensor=='S1'] = 1.17#1.   
+    # Sentinel-1 (VV)
+    F_mean[np.logical_and(sensor=='S1',pol=='VV')] = -0.91 #-1.19#-0.81#-7.
+    F_sd[np.logical_and(sensor=='S1',pol=='VV')] = 1.48 #1.8#0.94#0.75
+    NF_mean[np.logical_and(sensor=='S1',pol=='VV')] = -2.38 #-4.7#-4.38#-11.5
+    NF_sd[np.logical_and(sensor=='S1',pol=='VV')] = 1.84 #1.6#1.17#1
+
+    # Sentinel-1 (VH)
+    F_mean[np.logical_and(sensor=='S1',pol=='VH')] = -0.66
+    F_sd[np.logical_and(sensor=='S1',pol=='VH')] = 1.38
+    NF_mean[np.logical_and(sensor=='S1',pol=='VH')] = -2.51
+    NF_sd[np.logical_and(sensor=='S1',pol=='VH')] = 2.09
     
     # Sentinel-2
-    F_mean[sensor=='S2'] = -0.1#0.85
-    F_sd[sensor=='S2'] = 0.08#0.075
-    NF_mean[sensor=='S2'] =-0.34 #0.4
-    NF_sd[sensor=='S2'] = 0.14#0.125      
+    F_mean[sensor=='S2'] = -0.11#-0.1#0.85
+    F_sd[sensor=='S2'] = 0.1337#0.08#0.075
+    NF_mean[sensor=='S2'] = -0.28#-0.34 #0.4
+    NF_sd[sensor=='S2'] = 0.168#0.14#0.125      
     
     # Load files (axis 2 when > 1 observation at a given date)
     ds = gdal.Open(data_files[dates == date][0])
