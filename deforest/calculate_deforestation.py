@@ -91,9 +91,7 @@ data_files = glob.glob('/exports/eddie/scratch/sbowers3/chimanimani/L3_files/chi
 data_files.sort(key = lambda x: x.split('_')[4])
 data_files = np.array(data_files)
 
-mask_files = glob.glob('/exports/eddie/scratch/sbowers3/chimanimani/L3_files/chimanimaniGlobal*S1*_mask.tif')
-mask_files.sort(key = lambda x: x.split('_')[4])
-mask_files = np.array(mask_files)
+mask_files = np.array([i[:-8] + 'mask.tif' for i in data_files])
 
 datestrings = [x.split('/')[-1].split('_')[3] for x in data_files]
 dates = np.array([dt.date(int(x[:4]), int(x[4:6]), int(x[6:])) for x in datestrings])
@@ -143,10 +141,10 @@ for date in sorted(np.unique(dates)):
     NF_sd[np.logical_and(sensor=='S1',pol=='VH')] = 2.09
     
     # Sentinel-2
-    F_mean[sensor=='S2'] = -0.11#-0.1#0.85
-    F_sd[sensor=='S2'] = 0.1337#0.08#0.075
-    NF_mean[sensor=='S2'] = -0.28#-0.34 #0.4
-    NF_sd[sensor=='S2'] = 0.168#0.14#0.125      
+    F_mean[sensor=='S2'] = -0.097#-0.11#-0.1#0.85
+    F_sd[sensor=='S2'] = 0.17#0.1337#0.08#0.075
+    NF_mean[sensor=='S2'] = -0.3#-0.28#-0.34 #0.4
+    NF_sd[sensor=='S2'] = 0.17#0.168#0.14#0.125      
     
     # Load files (axis 2 when > 1 observation at a given date)
     ds = gdal.Open(data_files[dates == date][0])
@@ -197,7 +195,7 @@ for date in sorted(np.unique(dates)):
     flag[s] = False
     
     # Confirm change where pchange > chi (hardwired to 0.99)
-    s = np.logical_and(np.logical_and(np.logical_and(pchange > 0.99, flag == True), mask==False), deforestation == False)
+    s = np.logical_and(np.logical_and(np.logical_and(pchange > 0.999, flag == True), mask==False), deforestation == False)
     deforestation[s] = True
     deforestation_date[s] = date
     
