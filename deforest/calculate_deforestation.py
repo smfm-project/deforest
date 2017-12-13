@@ -166,7 +166,7 @@ for date in sorted(np.unique(dates)):
     
     # Determine conditinal probability of an observation being from NF (From Reiche et al. 2018)
     PNF[PNF < 1E-10000] = 0
-    PNF[PNF > 0] = (PNF[PNF>0]/(PF[PNF>0] + PNF[PNF>0]))
+    PNF[PNF > 0] = (PNF[PNF > 0] / (PF[PNF > 0] + PNF[PNF > 0]))
     
     ## Apply block weighting function fudge.
     PNF[PNF < 0.1] = 0.1
@@ -194,10 +194,10 @@ for date in sorted(np.unique(dates)):
     # Step 2.2: Reject or accept previously flagged cases    
     s = np.logical_and(pchange < 0.5, mask == False)
     deforestation_date[s] = dt.date(1970,1,1)
-    pchange[s] = 0.1
+    #pchange[s] = 0.1
     
     # Confirm change where pchange > chi (hardwired to 0.99)
-    s = np.logical_and(np.logical_and(pchange > 0.99, mask==False), deforestation == False)
+    s = np.logical_and(np.logical_and(pchange > 0.99, deforestation == False), mask == False)
     deforestation[s] = True
     
     # Update arrays for next round
@@ -205,8 +205,8 @@ for date in sorted(np.unique(dates)):
     PNF_last = PNF.copy()
     
     # Where > 1 observation, may need to apply block weighting function again
-    PNF_last[PNF_last > 0.9] = 0.9
-    PNF_last[PNF_last < 0.1] = 0.1
+    #PNF_last[PNF_last > 0.9] = 0.9
+    #PNF_last[PNF_last < 0.1] = 0.1
 
 
 
