@@ -212,10 +212,12 @@ for date in sorted(np.unique(dates)):
 
 
 confirmed_deforestation = deforestation_date.astype('datetime64[Y]').astype(int) + 1970
-confirmed_deforestation[deforestation == False] = 1970
+confirmed_deforestation[deforestation == False] = 0
+confirmed_deforestation[confirmed_deforestation == 1970] = 0
 
 warning_deforestation = deforestation_date.astype('datetime64[Y]').astype(int) + 1970
 warning_deforestation[deforestation == True] = 1970
+warning_deforestation[warning_deforestation == 1970] = 0
 
 
 data_ds = gdal.Open(data_files[0])
