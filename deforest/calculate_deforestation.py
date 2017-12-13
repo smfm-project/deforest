@@ -185,7 +185,7 @@ for date in sorted(np.unique(dates)):
     # Case A: A change appears which is flagged. but not confirmed
     s = np.logical_and(np.logical_and(flag == True, previous_flag == False), mask == False)
     pchange[s] = bayesUpdate(PNF_last[s], PNF[s])
-    deforestation_date[np.logical_and(s,flag]) = date
+    deforestation_date[s]) = date
         
     # Case B: There is a previously flagged change
     s = np.logical_and(previous_flag == True, mask == False)
