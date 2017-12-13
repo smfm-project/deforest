@@ -87,7 +87,7 @@ def combineObservations(probability, mask):
 # Load each image in turn, and calculate the probability of forest (from a start point of everything being forest)
 
 
-data_files = glob.glob('/exports/eddie/scratch/sbowers3/chimanimani/L3_files/chimanimaniGlobal*S1*_data.tif')
+data_files = glob.glob('/exports/eddie/scratch/sbowers3/chimanimani/L3_files/chimanimaniGlobal*_data.tif')
 data_files.sort(key = lambda x: x.split('_')[4])
 data_files = np.array(data_files)
 
@@ -197,7 +197,7 @@ for date in sorted(np.unique(dates)):
     deforestation_date[s] = dt.date(1970,1,1)
     
     # Confirm change where pchange > chi (hardwired to 0.99)
-    s = np.logical_and(np.logical_and(np.logical_and(pchange > 0.999, flag == True), mask==False), deforestation == False)
+    s = np.logical_and(np.logical_and(np.logical_and(pchange > 0.91, flag == True), mask==False), deforestation == False)
     deforestation[s] = True
     
     
