@@ -106,7 +106,7 @@ deforestation = np.zeros_like(gdal.Open(data_files[0]).ReadAsArray(), dtype=np.b
 previous_flag = np.zeros_like(deforestation, dtype=np.bool)
 false_alarms = np.zeros_like(deforestation, dtype=np.bool)
 PNF_last = np.zeros_like(deforestation, dtype = np.float) + 0.5 # Initialise to 0.5 probability of no forest
-deforestation_date = np.empty_like(deforestation, dtype='datetime64[D]')
+deforestation_date = np.zeros_like(deforestation, dtype='datetime64[D]')
 pchange = np.zeros_like(deforestation, dtype=np.float)
 
     
@@ -171,6 +171,7 @@ for date in sorted(np.unique(dates)):
     # Case A: A change appears which is flagged. but not confirmed
     s = np.logical_and(mask == False, previous_flag == False)
     pchange[s] = bayesUpdate(PNF_last[s], PNF[s])
+    deforestation_date[s] = date
         
     # Case B: There is a previously flagged change
     s = np.logical_and(mask == False, previous_flag == True)
@@ -179,11 +180,12 @@ for date in sorted(np.unique(dates)):
     # Step 2.2: Reject or accept previously flagged cases    
     s = np.logical_and(np.logical_and(pchange < 0.5, flag == True), mask == False)
     flag[s] = False
+    deforestation_date[s] = dt.date(1970,1,1)
     
     # Confirm change where pchange > chi (hardwired to 0.99)
     s = np.logical_and(np.logical_and(np.logical_and(pchange > 0.99, flag == True), mask==False), deforestation == False)
     deforestation[s] = True
-    deforestation_date[s] = date
+    
     
     # Update arrays for next round
     previous_flag = flag.copy()
@@ -194,16 +196,31 @@ for date in sorted(np.unique(dates)):
     PNF_last[PNF_last < 0.1] = 0.1
 
 
+
+confirmed_deforestation = deforestation_date.astype('datetime64[Y]').astype(int) + 1970
+confirmed_deforestation[deforestation == False] = 1970
+
+warning_deforestation = deforestation_date.astype('datetime64[Y]').astype(int) + 1970
+warning_deforestation[deforestation == True] = 1970
+
+
 data_ds = gdal.Open(data_files[0])
-
 gdal_driver = gdal.GetDriverByName('GTiff')
-ds = gdal_driver.Create('def_year.tif', data_ds.RasterXSize, data_ds.RasterYSize, 1, 3, options = ['COMPRESS=LZW'])
-
+ds = gdal_driver.Create('deforestation_confirmed.tif', data_ds.RasterXSize, data_ds.RasterYSize, 1, 3, options = ['COMPRESS=LZW'])
 proj = osr.SpatialReference()
 proj.ImportFromEPSG(32736)
-
 ds.SetGeoTransform(data_ds.GetGeoTransform())
 ds.SetProjection(proj.ExportToWkt())
-ds.GetRasterBand(1).WriteArray(deforestation_date.astype('datetime64[Y]').astype(int) + 1970)
+ds.GetRasterBand(1).WriteArray(confirmed_deforestation)
+ds = None
+    
+data_ds = gdal.Open(data_files[0])
+gdal_driver = gdal.GetDriverByName('GTiff')
+ds = gdal_driver.Create('deforestation_warning.tif', data_ds.RasterXSize, data_ds.RasterYSize, 1, 3, options = ['COMPRESS=LZW'])
+proj = osr.SpatialReference()
+proj.ImportFromEPSG(32736)
+ds.SetGeoTransform(data_ds.GetGeoTransform())
+ds.SetProjection(proj.ExportToWkt())
+ds.GetRasterBand(1).WriteArray(warning_deforestation)
 ds = None
     
