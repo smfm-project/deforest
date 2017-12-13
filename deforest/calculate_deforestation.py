@@ -183,23 +183,22 @@ for date in sorted(np.unique(dates)):
         
     # Step 2.1: Update flag and pchange for current time step
     # Case A: A change appears which is flagged. but not confirmed
-    s = np.logical_and(mask == False, previous_flag == False)
+    s = np.logical_and(np.logical_and(flag == True, previous_flag == False), mask == False)
     pchange[s] = bayesUpdate(PNF_last[s], PNF[s])
-    deforestation_date[s] = date
+    deforestation_date[np.logical_and(s,flag]) = date
         
     # Case B: There is a previously flagged change
-    s = np.logical_and(mask == False, previous_flag == True)
+    s = np.logical_and(previous_flag == True, mask == False)
     pchange[s] = bayesUpdate(pchange[s], PNF[s])
           
     # Step 2.2: Reject or accept previously flagged cases    
-    s = np.logical_and(np.logical_and(pchange < 0.5, flag == True), mask == False)
-    flag[s] = False
+    s = np.logical_and(pchange < 0.5, mask == False)
     deforestation_date[s] = dt.date(1970,1,1)
+    pchange[s] = 0.1
     
     # Confirm change where pchange > chi (hardwired to 0.99)
-    s = np.logical_and(np.logical_and(np.logical_and(pchange > 0.91, flag == True), mask==False), deforestation == False)
+    s = np.logical_and(np.logical_and(pchange > 0.99, mask==False), deforestation == False)
     deforestation[s] = True
-    
     
     # Update arrays for next round
     previous_flag = flag.copy()
