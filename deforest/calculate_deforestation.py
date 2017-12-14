@@ -87,7 +87,7 @@ def combineObservations(probability, mask):
 # Load each image in turn, and calculate the probability of forest (from a start point of everything being forest)
 
 
-data_files = glob.glob('/exports/eddie/scratch/sbowers3/chimanimani/L3_files/chimanimaniGlobal*_data.tif')
+data_files = glob.glob('/exports/eddie/scratch/sbowers3/chimanimani/L3_files/chimanimaniGlobal*2016*_data.tif')
 data_files.sort(key = lambda x: x.split('_')[4])
 data_files = np.array(data_files)
 
@@ -153,40 +153,50 @@ for date in sorted(np.unique(dates)):
     # Load files (axis 2 when > 1 observation at a given date)
     ds = gdal.Open(data_files[dates == date][0])
     data = np.zeros((ds.RasterYSize, ds.RasterXSize, (dates == date).sum()))
-    mask = np.zeros_like(data, dtype = np.bool)
+    mask_ind = np.zeros_like(data, dtype = np.bool)
     
     for n, (data_file, mask_file) in enumerate(zip(data_files[dates == date], mask_files[dates == date])):
         print 'Loading %s'%data_file
         data[:,:,n] = gdal.Open(data_file,0).ReadAsArray()
-        mask[:,:,n] = gdal.Open(mask_file,0).ReadAsArray()
+        mask_ind[:,:,n] = gdal.Open(mask_file,0).ReadAsArray()
     
     # Remove length-1 axes
-    data = np.squeeze(data)
-    mask = np.squeeze(mask)
+    #data = np.squeeze(data)
+    #mask = np.squeeze(mask)
     
     # Get probability of an observation being forest/nonforest
     #PF = scipy.stats.norm.pdf(data, F_mean, F_sd)
     #PNF = scipy.stats.norm.pdf(data, NF_mean, NF_sd)
     
     # Set up arrays of unique observations
-    PNF = np.zeros((data.shape[0], data.shape[1], np.unique(sensor).shape[0]))
+    obs = np.unique(sensor).shape[0]
+    if np.sum(sensor=='S2') > 1:
+        obs += (np.sum(sensor=='S2') - 1)
+    PNF = np.zeros((data.shape[0], data.shape[1], obs))
+    mask = np.zeros_like(PNF, dtype = np.bool)
     
     layer = 0
     
     if ('VV' in pol) and ('VH' in pol):
-        PNF[:,:,layer] = (0.316 * data[pol == 'VV']) + (0.462 * data[pol == 'VH']) + 1.205
+        PNF[:,:,layer:layer+1] = (0.316 * data[:,:,pol == 'VV']) + (0.462 * data[:,:,pol == 'VH']) + 1.205
+        mask[:,:,layer:layer+1] = np.logical_and(mask_ind[:,:,pol == 'VV'], mask_ind[:,:,pol == 'VH'])
         layer += 1
     
     if ('VV' in pol) and ('VH' not in pol):
-        PNF[:,:,layer] = (0.644 * data[pol == 'VV']) + 1.182
+        PNF[:,:,layer:layer+1] = (0.644 * data[:,:,pol == 'VV']) + 1.182
+        mask[:,:,layer:layer+1] = mask_ind[:,:,pol == 'VV']
         layer += 1
     
     if 'S2' in sensor:
-        PNF[:,:,layer] = (6.797 * data[sensor == 'S2']) + 0.759
-        layer+=1
+        PNF[:,:,layer:layer+np.sum(sensor=='S2')] = (6.797 * data[:,:,sensor == 'S2']) + 0.759
+        mask[:,:,layer:layer+np.sum(sensor=='S2')] = mask_ind[:,:,sensor == 'S2']
+        layer+=np.sum(sensor=='S2')
+
+    PNF = np.squeeze(PNF)
+    mask = np.squeeze(mask)
         
     # Change log odds to probability
-    PNF = 1 - np.exp(PNF) / 1 - np.exp(PNF)
+    PNF = 1 - (np.exp(PNF) / (1 + np.exp(PNF)))
     
     # Determine conditional probability of an observation being from NF (From Reiche et al. 2018)
     #PNF[PNF < 1E-10000] = 0
@@ -201,7 +211,6 @@ for date in sorted(np.unique(dates)):
         
         PNF, mask = combineObservations(PNF, mask)
         
- 
     # Flag potential changes
     flag = PNF > 0.5
         
@@ -216,9 +225,9 @@ for date in sorted(np.unique(dates)):
     pchange[s] = bayesUpdate(pchange[s], PNF[s])
           
     # Step 2.2: Reject or accept previously flagged cases    
-    s = np.logical_and(pchange < 0.5, mask == False)
+    s = np.logical_and(np.logical_and(pchange < 0.5, mask == False), flag == False)
     deforestation_date[s] = dt.date(1970,1,1)
-    #pchange[s] = 0.1
+    pchange[s] = 0.1
     
     # Confirm change where pchange > chi (hardwired to 0.99)
     s = np.logical_and(np.logical_and(pchange > 0.99, deforestation == False), mask == False)
