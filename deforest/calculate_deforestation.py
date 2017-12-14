@@ -100,6 +100,7 @@ sensors = np.array([x.split('/')[-1].split('_')[1] for x in data_files])
 pols = np.array([x.split('/')[-1].split('_')[2] for x in data_files])
 
 # Get selection that removes VV S1 files where a VH file exists
+'''
 sel = np.logical_and(np.in1d(dates,np.intersect1d(dates[pols == 'VH'],dates[pols == 'VV'])), pols == 'VV') == False
 
 data_files = data_files[sel]
@@ -107,6 +108,7 @@ mask_files = mask_files[sel]
 dates = dates[sel]
 sensors = sensors[sel]
 pols = pols[sel]
+'''
 
 # Initialise arrays
 deforestation = np.zeros_like(gdal.Open(data_files[0]).ReadAsArray(), dtype=np.bool)
@@ -122,7 +124,8 @@ for date in sorted(np.unique(dates)):
     
     sensor = sensors[dates == date]
     pol = pols[dates == date]    
-
+    
+    '''
     F_mean = np.zeros_like(sensors[dates == date], dtype = np.float64)
     F_sd = np.zeros_like(F_mean)
     NF_mean = np.zeros_like(F_mean)
@@ -145,6 +148,7 @@ for date in sorted(np.unique(dates)):
     F_sd[sensor=='S2'] = 0.17#0.1337#0.08#0.075
     NF_mean[sensor=='S2'] = -0.3#-0.28#-0.34 #0.4
     NF_sd[sensor=='S2'] = 0.17#0.168#0.14#0.125      
+    '''
     
     # Load files (axis 2 when > 1 observation at a given date)
     ds = gdal.Open(data_files[dates == date][0])
@@ -161,19 +165,36 @@ for date in sorted(np.unique(dates)):
     mask = np.squeeze(mask)
     
     # Get probability of an observation being forest/nonforest
-    PF = scipy.stats.norm.pdf(data, F_mean, F_sd)
-    PNF = scipy.stats.norm.pdf(data, NF_mean, NF_sd)
+    #PF = scipy.stats.norm.pdf(data, F_mean, F_sd)
+    #PNF = scipy.stats.norm.pdf(data, NF_mean, NF_sd)
     
-    # Determine conditinal probability of an observation being from NF (From Reiche et al. 2018)
-    PNF[PNF < 1E-10000] = 0
-    PNF[PNF > 0] = (PNF[PNF > 0] / (PF[PNF > 0] + PNF[PNF > 0]))
+    # Set up arrays of unique observations
+    PNF = np.zeros((data.shape[0], data.shape[1], np.unique(sensor).shape[0]))
+    
+    layer = 0
+    
+    if ('VV' in pol) and ('VH' in pol):
+        PNF[:,:,layer] = 1 - ((0.316 * data[pol == 'VV']) + (0.462 * data[pol == 'VH']) + 1.205)
+        layer += 1
+    
+    if ('VV' in pol) and ('VH' not in pol):
+        PNF[:,:,layer] = 1 - ((0.644 * data[pol == 'VV']) + 1.182)
+        layer += 1
+    
+    if 'S2' in sensor:
+        PNF[:,:,layer] = 1 - ((6.797 * data[sensor == 'S2']) + 0.759)
+        layer+=1
+    
+    # Determine conditional probability of an observation being from NF (From Reiche et al. 2018)
+    #PNF[PNF < 1E-10000] = 0
+    #PNF[PNF > 0] = (PNF[PNF > 0] / (PF[PNF > 0] + PNF[PNF > 0]))
     
     ## Apply block weighting function fudge.
     PNF[PNF < 0.1] = 0.1
     PNF[PNF > 0.9] = 0.9
     
     # If multiple observations from the same date exist, combine them (not performed where only one observation)
-    if (dates == date).sum() > 1:
+    if layer > 1:#(dates == date).sum() > 1:
         
         PNF, mask = combineObservations(PNF, mask)
         
