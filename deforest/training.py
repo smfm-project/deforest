@@ -170,7 +170,7 @@ shp = '/home/sbowers3/Documents/chimanimani/training_areas/training_areas.shp'
 
 # Load each image in turn, and calculate the probability of forest (from a start point of everything being forest)
 
-data_files = glob.glob(data_dir + 'chimanimaniGlobal*S2*_data.tif')
+data_files = glob.glob(data_dir + 'chimanimaniGlobal*_data.tif')
 data_files.sort(key = lambda x: x.split('_')[4])
 data_files = np.array(data_files)
 
@@ -181,57 +181,269 @@ dates = np.array([dt.date(int(x[:4]), int(x[4:6]), int(x[6:])) for x in datestri
 
 sensors = np.array([x.split('/')[-1].split('_')[1] for x in data_files])
 
+pols = np.array([x.split('/')[-1].split('_')[2] for x in data_files])
 
-forest = []
-nonforest = []
 
+forest_S2 = []
+nonforest_S2 = []
+forest_S1_dual_VV, forest_S1_dual_VH, nonforest_S1_dual_VV, nonforest_S1_dual_VH = [], [], [], []
+forest_S1_VV, nonforest_S1_VV = [], []
+
+
+forest_landcovers = ['forest','woodland']
+nonforest_landcovers = ['agriculture','scrub','smallholders']
 
 # Get unique dates
-for data_file, mask_file, date, sensor in zip(data_files, mask_files, dates, sensors):
-    
+for date in np.unique(dates):
+     
     if date >= dt.date(2017,1,1):
         continue
     
-    m = date.month
-    
-    # Load file    
-    print 'Loading %s'%data_file
-    data = gdal.Open(data_file,0).ReadAsArray()
-    mask = gdal.Open(mask_file,0).ReadAsArray()
-    
-    
-    # Get pixels of land cover type
-    pixels = rasterizeShapefile(gdal.Open(data_files[0]), shp, 'forest')
-    forest += list(data[np.logical_and(pixels, mask == False)])
-    
-    pixels = rasterizeShapefile(gdal.Open(data_files[0]), shp, 'woodland')
-    forest += list(data[np.logical_and(pixels, mask == False)])
-    
-    pixels = rasterizeShapefile(gdal.Open(data_files[0]), shp, 'agriculture')
-    nonforest += list(data[np.logical_and(pixels, mask == False)])
-    
-    pixels = rasterizeShapefile(gdal.Open(data_files[0]), shp, 'scrubland')
-    nonforest += list(data[np.logical_and(pixels, mask == False)])
-    
-    pixels = rasterizeShapefile(gdal.Open(data_files[0]), shp, 'smallholders')
-    nonforest += list(data[np.logical_and(pixels, mask == False)])   
-    
+    if 'S2' in sensors[dates == date]:
+        
+        s = np.logical_and(dates == date, sensors == 'S2')
 
-#x = np.linspace(-10, 4.5, 1000)
+        for data_file, mask_file in zip(data_files[s], mask_files[s]):        
+             
+            # Load file    
+            print 'Loading %s'%data_file
+            data = gdal.Open(data_file,0).ReadAsArray()
+            mask = gdal.Open(mask_file,0).ReadAsArray()
+        
+            for landcover in forest_landcovers:
+
+                # Get pixels of land cover type
+                pixels = rasterizeShapefile(gdal.Open(data_file), shp, landcover)
+                forest_S2 += list(data[np.logical_and(pixels, mask == False)])
+
+            for landcover in nonforest_landcovers:
+            
+                pixels = rasterizeShapefile(gdal.Open(data_file), shp, landcover)
+                nonforest_S2 += list(data[np.logical_and(pixels, mask == False)])
+
+    if 'S1' in sensors[dates == date]:
+        
+        if ('VV' in pols[dates == date]) and ('VH' in pols[dates == date]):
+            
+            s = np.logical_and(dates == date, sensors == 'S1')
+        
+            for data_file, mask_file, pol in zip(data_files[s], mask_files[s], pols[s]):
+                
+                # Load file    
+                print 'Loading %s'%data_file
+                data = gdal.Open(data_file,0).ReadAsArray()
+                mask = gdal.Open(mask_file,0).ReadAsArray()
+                
+                for landcover in forest_landcovers:
+
+                    # Get pixels of land cover type
+                    if pol == 'VH':
+                       pixels = rasterizeShapefile(gdal.Open(data_file), shp, landcover)
+                       forest_S1_dual_VH += list(data[np.logical_and(pixels, mask == False)])
+                    else:
+                       pixels = rasterizeShapefile(gdal.Open(data_file), shp, landcover)
+                       forest_S1_dual_VV += list(data[np.logical_and(pixels, mask == False)])
+
+                for landcover in nonforest_landcovers:
+
+                    # Get pixels of land cover type
+                    if pol == 'VH':
+                       pixels = rasterizeShapefile(gdal.Open(data_files[0]), shp, landcover)
+                       nonforest_S1_dual_VH += list(data[np.logical_and(pixels, mask == False)])
+                    else:
+                       pixels = rasterizeShapefile(gdal.Open(data_files[0]), shp, landcover)
+                       nonforest_S1_dual_VV += list(data[np.logical_and(pixels, mask == False)])
+
+        else:
+            
+            s = np.logical_and(dates == date, sensors == 'S1')
+            
+            for data_file, mask_file, pol in zip(data_files[s], mask_files[s], pols[s]):
+                
+                # Load file    
+                print 'Loading %s'%data_file
+                data = gdal.Open(data_file,0).ReadAsArray()
+                mask = gdal.Open(mask_file,0).ReadAsArray()
+        
+                for landcover in forest_landcovers:        
+                    # Get pixels of land cover type
+                    pixels = rasterizeShapefile(gdal.Open(data_file), shp, landcover)
+                    forest_S1_VV += list(data[np.logical_and(pixels, mask == False)])
+
+                for landcover in nonforest_landcovers:
+
+                    pixels = rasterizeShapefile(gdal.Open(data_files[0]), shp, landcover)
+                    nonforest_S1_VV += list(data[np.logical_and(pixels, mask == False)])
+
+
+
+            
+###########
+# Plot S2 #
+###########
+
 x = np.linspace(-1, 1, 1000)
 
-plt.hist(forest,normed=True, bins = 25, alpha = 0.5, label = 'Forest', color = 'green')
-forest_mu, forest_std = scipy.stats.norm.fit(forest)
+plt.hist(forest_S2,normed=True, bins = 25, alpha = 0.5, label = 'Forest', color = 'green')
+forest_mu, forest_std = scipy.stats.norm.fit(forest_S2)
 p = scipy.stats.norm.pdf(x, forest_mu, forest_std)
 plt.plot(x, p, 'green', linewidth=2)
 
-plt.hist(nonforest,normed=True, bins = 25, alpha = 0.5, label = 'Nonforest', color = 'orange')
-nonforest_mu, nonforest_std = scipy.stats.norm.fit(nonforest)
+plt.hist(nonforest_S2,normed=True, bins = 25, alpha = 0.5, label = 'Nonforest', color = 'orange')
+nonforest_mu, nonforest_std = scipy.stats.norm.fit(nonforest_S2)
 p = scipy.stats.norm.pdf(x, nonforest_mu, nonforest_std)
 plt.plot(x, p, 'orange', linewidth=2)
 
 plt.legend()
+#plt.show()
+
+
+# Alternatively, we might be able to use logistic regression. This means multiple features per image is possible, which might well improve things
+
+from sklearn.linear_model import LogisticRegression
+logistic = LogisticRegression()
+
+# Use every 17th forest measurement to equalise sample sizes
+y = np.array(([1] * len(forest_S2[::17])) + ([0] * len(nonforest_S2)))
+X = np.array(forest_S2[::17] + nonforest_S2)[:, np.newaxis]
+
+logistic.fit(X,y)
+
+plt.plot(x, logistic.predict_proba(x[:, np.newaxis])[:,0], 'blue', linewidth=2)
+
 plt.show()
+
+
+###########
+# Plot S1 #
+###########
+
+x = np.linspace(-10, 10, 1000)
+
+fig, ax1 = plt.subplots()
+
+ax1.hist(forest_S1_VV,normed=True, bins = 25, alpha = 0.5, label = 'Forest', color = 'green')
+forest_mu, forest_std = scipy.stats.norm.fit(forest_S1_VV)
+p = scipy.stats.norm.pdf(x, forest_mu, forest_std)
+ax1.plot(x, p, 'green', linewidth=2)
+
+ax1.hist(nonforest_S1_VV,normed=True, bins = 25, alpha = 0.5, label = 'Nonforest', color = 'orange')
+nonforest_mu, nonforest_std = scipy.stats.norm.fit(nonforest_S1_VV)
+p = scipy.stats.norm.pdf(x, nonforest_mu, nonforest_std)
+ax1.plot(x, p, 'orange', linewidth=2)
+
+plt.legend()
+#plt.show()
+
+ax2 = ax1.twinx()
+
+# Alternatively, we might be able to use logistic regression. This means multiple features per image is possible, which might well improve things
+
+from sklearn.linear_model import LogisticRegression
+logistic = LogisticRegression()
+
+# Use every 17th forest measurement to equalise sample sizes
+y = np.array(([1] * len(forest_S1_VV[::10])) + ([0] * len(nonforest_S1_VV)))
+X = np.array(forest_S1_VV[::10] + nonforest_S1_VV)[:, np.newaxis]
+
+logistic.fit(X,y)
+
+ax2.plot(x, logistic.predict_proba(x[:, np.newaxis])[:,0], 'blue', linewidth=2)
+
+import scipy.stats
+# Compare this to the result from probability:
+PF = scipy.stats.norm.pdf(x, np.mean(forest_S1_VV), np.std(forest_S1_VV))
+PNF = scipy.stats.norm.pdf(x, np.mean(nonforest_S1_VV), np.std(nonforest_S1_VV))
+PNF[PNF < 1E-10000] = 0
+PNF[PNF > 0] = (PNF[PNF > 0] / (PF[PNF > 0] + PNF[PNF > 0]))
+
+ax2.plot(x, PNF, 'red', linewidth = 2)
+
+plt.show()
+
+
+
+
+
+###################
+# Plot S1 (HH/HV) #
+###################
+
+x = np.linspace(-10, 10, 1000)
+
+fig, ax1 = plt.subplots()
+
+ax1.hist(forest_S1_dual_VV,normed=True, bins = 25, alpha = 0.5, label = 'Forest', color = 'darkgreen')
+forest_mu, forest_std = scipy.stats.norm.fit(forest_S1_VV)
+p = scipy.stats.norm.pdf(x, forest_mu, forest_std)
+ax1.plot(x, p, 'green', linewidth=2)
+
+ax1.hist(nonforest_S1_dual_VV,normed=True, bins = 25, alpha = 0.5, label = 'Nonforest', color = 'darkorange')
+nonforest_mu, nonforest_std = scipy.stats.norm.fit(nonforest_S1_VV)
+p = scipy.stats.norm.pdf(x, nonforest_mu, nonforest_std)
+ax1.plot(x, p, 'orange', linewidth=2)
+
+
+ax1.hist(forest_S1_dual_VH,normed=True, bins = 25, alpha = 0.5, label = 'Forest', color = 'blue')
+forest_mu, forest_std = scipy.stats.norm.fit(forest_S1_dual_VV)
+p = scipy.stats.norm.pdf(x, forest_mu, forest_std)
+ax1.plot(x, p, 'blue', linewidth=2)
+
+ax1.hist(nonforest_S1_dual_VH,normed=True, bins = 25, alpha = 0.5, label = 'Nonforest', color = 'red')
+nonforest_mu, nonforest_std = scipy.stats.norm.fit(nonforest_S1_dual_VH)
+p = scipy.stats.norm.pdf(x, nonforest_mu, nonforest_std)
+ax1.plot(x, p, 'red', linewidth=2)
+
+
+plt.legend()
+#plt.show() 
+
+ax2 = ax1.twinx()
+
+# Alternatively, we might be able to use logistic regression. This means multiple features per image is possible, which might well improve things
+
+from sklearn.linear_model import LogisticRegression
+logistic = LogisticRegression()
+
+# Use every 17th forest measurement to equalise sample sizes
+y = np.array(([1] * len(forest_S1_dual_VV[::10])) + ([0] * len(nonforest_S1_dual_VV)))
+X = np.transpose(np.array([forest_S1_dual_VV[::10] + nonforest_S1_dual_VV, forest_S1_dual_VH[::10] + nonforest_S1_dual_VH]))
+#X = np.hstack((X,(X[:,0]/X[:,1])[:,None]))
+
+logistic.fit(X,y)
+
+ax2.plot(x, logistic.predict_proba(np.transpose(np.vstack((x,np.zeros_like(x)-2))))[:,0], 'blue', linewidth=2)
+
+import scipy.stats
+# Compare this to the result from probability:
+PF = scipy.stats.norm.pdf(x, np.mean(forest_S1_VV), np.std(forest_S1_VV))
+PNF = scipy.stats.norm.pdf(x, np.mean(nonforest_S1_VV), np.std(nonforest_S1_VV))
+PNF[PNF < 1E-10000] = 0
+PNF[PNF > 0] = (PNF[PNF > 0] / (PF[PNF > 0] + PNF[PNF > 0]))
+
+ax2.plot(x, PNF, 'red', linewidth = 2)
+
+plt.show()
+
+for i in range(-10,10,1):
+   plt.plot(x, logistic.predict_proba(np.transpose(np.vstack((x,np.zeros_like(x)+i))))[:,0], 'blue', linewidth=2)
+
+# VV only
+logistic = LogisticRegression()
+# Use every 17th forest measurement to equalise sample sizes
+y = np.array(([1] * len(forest_S1_VV[::10])) + ([0] * len(nonforest_S1_VV)))
+X = np.array(forest_S1_VV[::10] + nonforest_S1_VV)[:, np.newaxis]
+
+logistic.fit(X,y)
+
+plt.plot(x, logistic.predict_proba(x[:,np.newaxis])[:,0], 'red', linewidth=2)
+
+logodds = (logistic.coef_[0][0]*(x[:,np.newaxis]))+logistic.intercept_[0]
+
+plt.plot(x, 1-np.exp(logodds)/(1+np.exp(logodds)), 'darkred', linewidth=2)
+
+plt.show()
+
 
 """
 # Plot variation
