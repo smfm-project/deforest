@@ -174,16 +174,19 @@ for date in sorted(np.unique(dates)):
     layer = 0
     
     if ('VV' in pol) and ('VH' in pol):
-        PNF[:,:,layer] = 1 - ((0.316 * data[pol == 'VV']) + (0.462 * data[pol == 'VH']) + 1.205)
+        PNF[:,:,layer] = (0.316 * data[pol == 'VV']) + (0.462 * data[pol == 'VH']) + 1.205
         layer += 1
     
     if ('VV' in pol) and ('VH' not in pol):
-        PNF[:,:,layer] = 1 - ((0.644 * data[pol == 'VV']) + 1.182)
+        PNF[:,:,layer] = (0.644 * data[pol == 'VV']) + 1.182
         layer += 1
     
     if 'S2' in sensor:
-        PNF[:,:,layer] = 1 - ((6.797 * data[sensor == 'S2']) + 0.759)
+        PNF[:,:,layer] = (6.797 * data[sensor == 'S2']) + 0.759
         layer+=1
+        
+    # Change log odds to probability
+    PNF = 1 - np.exp(PNF) / 1 - np.exp(PNF)
     
     # Determine conditional probability of an observation being from NF (From Reiche et al. 2018)
     #PNF[PNF < 1E-10000] = 0
