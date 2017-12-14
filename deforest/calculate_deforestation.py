@@ -87,7 +87,7 @@ def combineObservations(probability, mask):
 # Load each image in turn, and calculate the probability of forest (from a start point of everything being forest)
 
 
-data_files = glob.glob('/exports/eddie/scratch/sbowers3/chimanimani/L3_files/chimanimaniGlobal*2016*_data.tif')
+data_files = glob.glob('/exports/eddie/scratch/sbowers3/chimanimani/L3_files/chimanimaniGlobal*S1*_data.tif')
 data_files.sort(key = lambda x: x.split('_')[4])
 data_files = np.array(data_files)
 
@@ -203,8 +203,8 @@ for date in sorted(np.unique(dates)):
     #PNF[PNF > 0] = (PNF[PNF > 0] / (PF[PNF > 0] + PNF[PNF > 0]))
     
     ## Apply block weighting function fudge.
-    PNF[PNF < 0.1] = 0.1
-    PNF[PNF > 0.9] = 0.9
+    PNF[PNF < 0.02] = 0.02
+    PNF[PNF > 0.98] = 0.98
     
     # If multiple observations from the same date exist, combine them (not performed where only one observation)
     if layer > 1:#(dates == date).sum() > 1:
