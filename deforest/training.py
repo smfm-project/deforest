@@ -300,16 +300,13 @@ plt.legend()
 
 # Alternatively, we might be able to use logistic regression. This means multiple features per image is possible, which might well improve things
 
-from sklearn.linear_model import LogisticRegression
-logistic = LogisticRegression()
-
-# Use every 17th forest measurement to equalise sample sizes
-y = np.array(([1] * len(forest_S2[::17])) + ([0] * len(nonforest_S2)))
-X = np.array(forest_S2[::17] + nonforest_S2)[:, np.newaxis]
-
+# balanced classes
+logistic = LogisticRegression(class_weight='balanced')
+y = np.array(([1] * len(forest_S2)) + ([0] * len(nonforest_S2)))
+X = np.array(forest_S2 + nonforest_S2)[:, np.newaxis]
 logistic.fit(X,y)
+plt.plot(x, logistic.predict_proba(x[:, np.newaxis])[:,0], 'red', linewidth=2)
 
-plt.plot(x, logistic.predict_proba(x[:, np.newaxis])[:,0], 'blue', linewidth=2)
 
 plt.show()
 
@@ -340,11 +337,10 @@ ax2 = ax1.twinx()
 # Alternatively, we might be able to use logistic regression. This means multiple features per image is possible, which might well improve things
 
 from sklearn.linear_model import LogisticRegression
-logistic = LogisticRegression()
+logistic = LogisticRegression(class_weight='balanced')
 
-# Use every 17th forest measurement to equalise sample sizes
-y = np.array(([1] * len(forest_S1_VV[::10])) + ([0] * len(nonforest_S1_VV)))
-X = np.array(forest_S1_VV[::10] + nonforest_S1_VV)[:, np.newaxis]
+y = np.array(([1] * len(forest_S1_VV)) + ([0] * len(nonforest_S1_VV)))
+X = np.array(forest_S1_VV + nonforest_S1_VV)[:, np.newaxis]
 
 logistic.fit(X,y)
 
@@ -402,12 +398,11 @@ ax2 = ax1.twinx()
 
 # Alternatively, we might be able to use logistic regression. This means multiple features per image is possible, which might well improve things
 
-from sklearn.linear_model import LogisticRegression
-logistic = LogisticRegression()
+logistic = LogisticRegression(class_weight='balanced')
 
 # Use every 17th forest measurement to equalise sample sizes
-y = np.array(([1] * len(forest_S1_dual_VV[::10])) + ([0] * len(nonforest_S1_dual_VV)))
-X = np.transpose(np.array([forest_S1_dual_VV[::10] + nonforest_S1_dual_VV, forest_S1_dual_VH[::10] + nonforest_S1_dual_VH]))
+y = np.array(([1] * len(forest_S1_dual_VV)) + ([0] * len(nonforest_S1_dual_VV)))
+X = np.transpose(np.array([forest_S1_dual_VV + nonforest_S1_dual_VV, forest_S1_dual_VH + nonforest_S1_dual_VH]))
 #X = np.hstack((X,(X[:,0]/X[:,1])[:,None]))
 
 logistic.fit(X,y)
@@ -429,10 +424,9 @@ for i in range(-10,10,1):
    plt.plot(x, logistic.predict_proba(np.transpose(np.vstack((x,np.zeros_like(x)+i))))[:,0], 'blue', linewidth=2)
 
 # VV only
-logistic = LogisticRegression()
-# Use every 17th forest measurement to equalise sample sizes
-y = np.array(([1] * len(forest_S1_VV[::10])) + ([0] * len(nonforest_S1_VV)))
-X = np.array(forest_S1_VV[::10] + nonforest_S1_VV)[:, np.newaxis]
+logistic = LogisticRegression(class_weight='balanced')
+y = np.array(([1] * len(forest_S1_VV)) + ([0] * len(nonforest_S1_VV)))
+X = np.array(forest_S1_VV + nonforest_S1_VV)[:, np.newaxis]
 
 logistic.fit(X,y)
 
