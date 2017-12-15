@@ -87,7 +87,7 @@ def combineObservations(probability, mask):
 # Load each image in turn, and calculate the probability of forest (from a start point of everything being forest)
 
 
-data_files = glob.glob('/exports/eddie/scratch/sbowers3/chimanimani/L3_files/chimanimaniGlobal*S1*_data.tif')
+data_files = glob.glob('/exports/eddie/scratch/sbowers3/chimanimani/L3_files/chimanimaniGlobal*_data.tif')
 data_files.sort(key = lambda x: x.split('_')[4])
 data_files = np.array(data_files)
 
@@ -111,7 +111,7 @@ pols = pols[sel]
 '''
 
 # Initialise arrays
-deforestation = np.zeros_like(gdal.Open(data_files[0]).ReadAsArray(), dtype=np.bool)
+deforestation = np.zeros_like(gdal.Open(data_files[0]).ReadAsArray(), dtype=np.bool)#[2500:2600,2500:2600]
 previous_flag = np.zeros_like(deforestation, dtype=np.bool)
 false_alarms = np.zeros_like(deforestation, dtype=np.bool)
 PNF_last = np.zeros_like(deforestation, dtype = np.float) + 0.5 # Initialise to 0.5 probability of no forest
@@ -157,8 +157,8 @@ for date in sorted(np.unique(dates)):
     
     for n, (data_file, mask_file) in enumerate(zip(data_files[dates == date], mask_files[dates == date])):
         print 'Loading %s'%data_file
-        data[:,:,n] = gdal.Open(data_file,0).ReadAsArray()
-        mask_ind[:,:,n] = gdal.Open(mask_file,0).ReadAsArray()
+        data[:,:,n] = gdal.Open(data_file,0).ReadAsArray()#[2500:2600,2500:2600]
+        mask_ind[:,:,n] = gdal.Open(mask_file,0).ReadAsArray()#[2500:2600,2500:2600]
     
     # Remove length-1 axes
     #data = np.squeeze(data)
@@ -203,8 +203,8 @@ for date in sorted(np.unique(dates)):
     #PNF[PNF > 0] = (PNF[PNF > 0] / (PF[PNF > 0] + PNF[PNF > 0]))
     
     ## Apply block weighting function fudge.
-    PNF[PNF < 0.02] = 0.02
-    PNF[PNF > 0.98] = 0.98
+    PNF[PNF < 0.01] = 0.01
+    PNF[PNF > 0.99] = 0.99
     
     # If multiple observations from the same date exist, combine them (not performed where only one observation)
     if layer > 1:#(dates == date).sum() > 1:
@@ -215,32 +215,30 @@ for date in sorted(np.unique(dates)):
     flag = PNF > 0.5
         
     # Step 2.1: Update flag and pchange for current time step
-    # Case A: A change appears which is flagged. but not confirmed
-    s = np.logical_and(np.logical_and(flag == True, previous_flag == False), mask == False)
+    # Case A: A new change appears which is flagged. but not confirmed
+    s = np.logical_and(np.logical_and(np.logical_and(flag == True, previous_flag == False), mask == False), deforestation == False)
     pchange[s] = bayesUpdate(PNF_last[s], PNF[s])
-    deforestation_date[np.logical_and(s, deforestation == False)] = date
+    deforestation_date[s] = date
         
     # Case B: There is a previously flagged change
     s = np.logical_and(previous_flag == True, mask == False)
     pchange[s] = bayesUpdate(pchange[s], PNF[s])
-          
-    # Step 2.2: Reject or accept previously flagged cases    
-    s = np.logical_and(np.logical_and(pchange < 0.5, mask == False), flag == False)
+    
+    
+    # Step 2.2: Reject or accept previously flagged cases
+    # Case A: Reject, where pchange falls below 50 %
+    s = np.logical_and(np.logical_and(np.logical_and(pchange < 0.5, mask == False), previous_flag == True), deforestation == False)
     deforestation_date[s] = dt.date(1970,1,1)
     pchange[s] = 0.1
+    previous_flag[s] = False
     
-    # Confirm change where pchange > chi (hardwired to 0.99)
+    # Case B: Confirm, where pchange > chi (hardwired to 99 %)
     s = np.logical_and(np.logical_and(pchange > 0.99, deforestation == False), mask == False)
     deforestation[s] = True
     
     # Update arrays for next round
     previous_flag = flag.copy()
-    PNF_last = PNF.copy()
-    
-    # Where > 1 observation, may need to apply block weighting function again
-    #PNF_last[PNF_last > 0.9] = 0.9
-    #PNF_last[PNF_last < 0.1] = 0.1
-
+    PNF_last = PNF.copy()    
 
 
 confirmed_deforestation = deforestation_date.astype('datetime64[Y]').astype(int) + 1970
@@ -248,7 +246,8 @@ confirmed_deforestation[deforestation == False] = 0
 confirmed_deforestation[confirmed_deforestation == 1970] = 0
 
 warning_deforestation = deforestation_date.astype('datetime64[Y]').astype(int) + 1970
-warning_deforestation[deforestation == True] = 1970
+warning_deforestation[deforestation == True] = 0
+warning_deforestation[pchange<0.5] = 0
 warning_deforestation[warning_deforestation == 1970] = 0
 
 
