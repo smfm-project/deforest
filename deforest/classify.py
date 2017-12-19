@@ -1,5 +1,6 @@
 
 import argparse
+import datetime as dt
 import glob
 import glymur
 import matplotlib.pyplot as plt
@@ -9,6 +10,7 @@ import os
 from osgeo import gdal
 import scipy.ndimage
 import xml.etree.ElementTree as ET
+import uuid
 
 import pdb
 
@@ -60,16 +62,16 @@ def loadS2NDVI(L2A_file, res):
     return ndvi
 
 
-def loadS1Gamma0(dim_file, polarisation = 'VV'):
+def loadS1Single(dim_file, polarisation = 'VV'):
     """
-    Extract Gamma0 data given .dim file and polarisation
+    Extract backscatter data given .dim file and polarisation
     
     Args:
-        dim_file: 
+        dim_file:
         polarisation: (i.e. 'VV' or 'VH')
     
     Returns:
-        A maked numpy array of Gamma0 backscatter.
+        A maked numpy array of backscatter.
     """
     
     # Remove trailing slash from input filename, if it exists, and determine path of data file
@@ -90,7 +92,30 @@ def loadS1Gamma0(dim_file, polarisation = 'VV'):
     return np.ma.array(data, mask = mask)
 
 
-def getS1Metadata(dim_file, polarisation = 'VV'):
+def loadS1Dual(dim_file):
+    """
+    Extract backscatter metrics from a dual-polarised Sentinel-1 image.
+    
+    Args:
+        dim_file: 
+    
+    Returns:
+        A maked numpy array of VV, VH and VV/VH backscatter.
+    """
+    
+    assert getImageType(dim_file) == 'S1dual', "input file %s does not appear to be a dual polarised Sentinel-1 file"%dim_file
+        
+    VV = loadS1Single(dim_file, polarisation = 'VV')
+    
+    VH = loadS1Single(dim_file, polarisation = 'VH')
+    
+    VV_VH = VV / VH
+    
+    return np.ma.dstack((VV, VH, VV_VH))
+
+    
+
+def getS1Metadata(dim_file):
     '''
     Function to extract georefence info from level 2A Sentinel 2 data in .SAFE format.
     
@@ -106,40 +131,38 @@ def getS1Metadata(dim_file, polarisation = 'VV'):
     
     from osgeo import gdal, osr
     
-    # Remove trailing / from granule directory if present 
-    dim_file = dim_file.rstrip('/')
-    data_file = dim_file[:-4] + '.data'
-    
-    assert polarisation == 'VV' or polarisation == 'VH', "Polarisation must be VV or VH. getS1Metadata() was given %s"%polarisation    
     assert os.path.exists(dim_file), "The location %s does not contain a Sentinel-1 .dim file."%dim_file
-    assert os.path.exists(data_file), "The location %s does not contain a Sentinel-1 .data file."%data_file
-
-    ds = gdal.Open('%s/Gamma0_%s.img'%(data_file,polarisation))
-
-    geo_t = ds.GetGeoTransform()
+    
+    tree = ET.ElementTree(file = dim_file)
+    root = tree.getroot()
     
     # Get array size
-    nrows = ds.RasterYSize
-    ncols = ds.RasterXSize
+    size = root.find("Raster_Dimensions")  
+    nrows = int(size.find('NROWS').text)
+    ncols = int(size.find('NCOLS').text)
     
-    # Get extent data
-    ulx = geo_t[0]
-    uly = geo_t[3]
-    xres = geo_t[1]
-    yres = geo_t[5]
+    geopos = root.find("Geoposition/IMAGE_TO_MODEL_TRANSFORM").text.split(',')
+    ulx = float(geopos[4])
+    uly = float(geopos[5])
+    xres = float(geopos[0])
+    yres = float(geopos[3])
     lrx = ulx + (xres * ncols)
     lry = uly + (yres * nrows)
     extent = [ulx, lry, lrx, uly]
     
     res = abs(xres)
+        
+    wkt = root.find("Coordinate_Reference_System/WKT").text
     
-    # Find EPSG code to define projection
-    srs = osr.SpatialReference(wkt=ds.GetProjection())
+    srs = osr.SpatialReference(wkt = wkt)
     srs.AutoIdentifyEPSG()
     EPSG = int(srs.GetAttrValue("AUTHORITY", 1))
     
     # Extract date string from filename
-    date = dim_file.split('/')[-1].split('_')[-5]
+    datestring = root.find("Production/PRODUCT_SCENE_RASTER_START_TIME").text.split(' ')[0]
+    
+    # And convert to a datetime object
+    date = dt.datetime.strptime(datestring, '%d-%b-%Y').date()
     
     return extent, EPSG, res, date
 
@@ -202,6 +225,8 @@ def getS2Metadata(granule_file, resolution = 20):
         # If new file format
         date = granule_file.split('/')[-1].split('_')[-1].split('T')[0]
     
+    date = dt.date(int(date[:4]), int(date[4:6]), int(date[6:]))
+    
     return extent, EPSG, date
 
 
@@ -254,8 +279,131 @@ def buildMetadataDictionary(extent_dest, res, EPSG):
 
 
 
+def _testOutsideTile(md_source, md_dest):
+    '''
+    Function that uses metadata dictionaries from buildMetadatadisctionary() metadata to test whether any part of a source data falls inside destination tile.
+    
+    Args:
+        md_source: A metadata dictionary created by buildMetadataDictionary() representing the source image.
+        md_dest: A metadata dictionary created by buildMetadataDictionary() representing the destination image.
+        
+    Returns:
+        A boolean (True/False) value.
+    '''
+    
+    from osgeo import osr
+            
+    # Set up function to translate coordinates from source to destination
+    tx = osr.CoordinateTransformation(md_source['proj'], md_dest['proj'])
+         
+    # And translate the source coordinates
+    md_source['ulx'], md_source['uly'], z = tx.TransformPoint(md_source['ulx'], md_source['uly'])
+    md_source['lrx'], md_source['lry'], z = tx.TransformPoint(md_source['lrx'], md_source['lry'])   
+    
+    out_of_tile =  md_source['ulx'] >= md_dest['lrx'] or \
+                   md_source['lrx'] <= md_dest['ulx'] or \
+                   md_source['uly'] <= md_dest['lry'] or \
+                   md_source['lry'] >= md_dest['uly']
+    
+    return out_of_tile
 
-def _createGdalDataset(md, data_out = None, filename = '', driver = 'MEM', dtype = 3, options = []):
+
+
+def getImageType(infile):
+    '''
+    Determines the type of image from a filepath.
+    
+    Args:
+        infile: '/path/to/input_file'
+    
+    Returns
+        A string indicating the file type. This can be 'S2' (Sentinel-2), 'S1single' (Sentinel-1, VV polarised), or 'S1dual' (Sentinel-1, VV/VH polarised).
+    '''
+    
+    if infile.split('/')[-3].split('.')[-1] == 'SAFE':
+        
+        image_type = 'S2'
+    
+    elif infile.split('/')[-1].split('.')[-1] == 'dim':
+        
+        # Use metadata to determine number of bands
+        tree = ET.ElementTree(file = infile)
+        root = tree.getroot()
+    
+        # Get array size
+        bands = int(root.find("Raster_Dimensions/NBANDS").text)
+        
+        if bands > 1:
+            image_type = 'S1dual'
+        else:
+            image_type = 'S1single'
+     
+    else: 
+        print 'File %s does not match any expected file pattern'%infile
+        image_type = None
+    
+    return image_type
+    
+    
+
+
+def getFilesInTile(source_files, md_dest):
+    '''
+    Takes a list of source files as input, and determines where each falls within extent of output tile.
+    
+    Args:
+        source_files: A list of S1/S2 input files.
+        md_dest: Dictionary from buildMetaDataDictionary() containing output projection details.
+
+    Returns:
+        A reduced list of source_files containing only files that will contribute to each tile.
+    '''
+      
+    do_file = []
+
+ 
+    for infile in source_files:
+        
+        if getImageType(infile) == 'S2':
+            
+            # Extract this image's resolution from md_dest
+            if md_dest['res'] < 20:
+                res_source = 10
+            elif md_dest['res'] >= 20 and md_dest['res'] < 60:
+                res_source = 20
+            elif md_dest['res'] >= 60:
+                res_source = 60
+            
+            # Get source file metadata if from Sentinel-2
+            extent_source, EPSG_source, date = getS2Metadata(infile, resolution = res_source)
+            
+        
+        elif getImageType(infile) == 'S1single' or getImageType(infile) == 'S1dual':
+                        
+            # Get source file metadata if from Sentinel-1
+            extent_source, EPSG_source, res_source, date = getS1Metadata(infile)            
+             
+        # Define source file metadata dictionary
+        md_source = buildMetadataDictionary(extent_source, res_source, EPSG_source)
+
+        # Skip processing the file if image falls outside of tile area
+        if _testOutsideTile(md_source, md_dest):
+            do_file.append(False)
+            continue
+        
+        #print '    Found one: %s'%input_file
+        do_file.append(True)
+    
+    # Get subset of source_files in specified limits
+    source_files_tile = list(np.array(source_files)[np.array(do_file)])
+        
+    return source_files_tile
+
+
+
+
+
+def _createGdalDataset(md, data_out = None, filename = '', driver = 'MEM', dtype = 3, RasterCount = 1, nodata = None, options = []):
     '''
     Function to create an empty gdal dataset with georefence info from metadata dictionary.
 
@@ -273,17 +421,25 @@ def _createGdalDataset(md, data_out = None, filename = '', driver = 'MEM', dtype
     from osgeo import gdal, osr
        
     gdal_driver = gdal.GetDriverByName(driver)
-    ds = gdal_driver.Create(filename, md['ncols'], md['nrows'], 1, dtype, options = options)
+    ds = gdal_driver.Create(filename, md['ncols'], md['nrows'], RasterCount, dtype, options = options)
     
     ds.SetGeoTransform(md['geo_t'])
     
     proj = osr.SpatialReference()
     proj.ImportFromEPSG(md['EPSG_code'])
     ds.SetProjection(proj.ExportToWkt())
-       
-    # If a data array specified, add it to the gdal dataset
+        
+    # If a data array specified, add data to the gdal dataset
     if type(data_out).__module__ == np.__name__:
-        ds.GetRasterBand(1).WriteArray(data_out)
+        
+        if len(data_out.shape) == 2:
+            data_out = np.ma.expand_dims(data_out,2)
+        
+        for feature in range(RasterCount):
+            ds.GetRasterBand(feature + 1).WriteArray(data_out[:,:,feature])
+            
+            if nodata != None:
+                ds.GetRasterBand(feature + 1).SetNoDataValue(nodata)
     
     # If a filename is specified, write the array to disk.
     if filename != '':
@@ -313,28 +469,37 @@ def _reprojectImage(ds_source, ds_dest, md_source, md_dest, nodatavalue = 0):
     proj_dest = md_dest['proj'].ExportToWkt()
     
     # Set nodata value
-    ds_dest.GetRasterBand(1).Fill(nodatavalue)
-    ds_dest.GetRasterBand(1).SetNoDataValue(nodatavalue)
+    for feature in range(ds_dest.RasterCount):
+        ds_dest.GetRasterBand(feature + 1).Fill(nodatavalue)
+        ds_dest.GetRasterBand(feature + 1).SetNoDataValue(nodatavalue)
     
     # Reproject source into dest project coordinates
     gdal.ReprojectImage(ds_source, ds_dest, proj_source, proj_dest, gdal.GRA_NearestNeighbour)
-            
-    ds_resampled = ds_dest.GetRasterBand(1).ReadAsArray()
     
-    return ds_resampled
+    data_resampled = np.zeros((ds_dest.RasterYSize,ds_dest.RasterXSize, ds_dest.RasterCount))
+    
+    for feature in range(ds_dest.RasterCount):
+        data_resampled[:,:,feature] = ds_dest.GetRasterBand(feature + 1).ReadAsArray()
+    
+    return data_resampled
 
 
 def subset(data, md_source, md_dest, dtype = 3):
     '''
     '''
-    
+       
+    if len(data.shape) == 2:
+        RasterCount = 1
+    else:
+        RasterCount = data.shape[2]
+        
     # Write array to a gdal dataset
-    ds_source = _createGdalDataset(md_source, data_out = data.data, dtype = dtype)
-    ds_dest = _createGdalDataset(md_dest, dtype = dtype)
+    ds_source = _createGdalDataset(md_source, data_out = data.data, dtype = dtype, RasterCount = RasterCount)
+    ds_dest = _createGdalDataset(md_dest, dtype = dtype, RasterCount = RasterCount)
     data_resampled = _reprojectImage(ds_source, ds_dest, md_source, md_dest)
     
-    ds_source = _createGdalDataset(md_source, data_out = data.mask, dtype = 1)
-    ds_dest = _createGdalDataset(md_dest, dtype = 1)
+    ds_source = _createGdalDataset(md_source, data_out = data.mask, dtype = 1, RasterCount = RasterCount)
+    ds_dest = _createGdalDataset(md_dest, dtype = 1, RasterCount = RasterCount)
     mask_resampled = _reprojectImage(ds_source, ds_dest, md_source, md_dest, nodatavalue = 1) # No data values should be added to the mask
     
     return np.ma.array(data_resampled, mask = mask_resampled)
@@ -350,7 +515,7 @@ def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentil
         md: metadata dictionary
         normalisation_type: Select one of 'none' (no normalisation), 'global' (subtract percentile of entire scene), or 'local' (subtract percentile from the area surrounding each pixel).
         percentile: Data percentile to subtract, if normalisation_type == 'local' or 'global'. Defaults to 95%.
-        area: Area in m^2 to determine the kernel size if normalisation_type == 'local'. This should be greater than the size of a deforestation event. Defaults to 200,000 m^2 (20 ha).
+        area: Area in m^2 to determine the kernel size if normalisation_type == 'local'. This should be greater than the size of expected deforestation events. Defaults to 200,000 m^2 (20 ha).
     
     Returns:
         The deseasonalised numpy array
@@ -359,99 +524,165 @@ def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentil
     
     assert normalisation_type in ['none','local','global'], "normalisation_type must be one of 'none', 'local' or 'global'. It was set to %s."%str(normalisation_type)  
     
+        
+    # Takes care of case where only a 2d array is input, allowing us to loop through the third axis
+    if data.ndim == 2:
+        data = np.ma.expand_dims(data,2)
+        
     # No normalisation
     if normalisation_type == 'none':
-        data_percentile = 0.
+        data_percentile = np.zeros_like(data)
     
     # Following Hamunyela et al. 2016
     if normalisation_type == 'local':
+                
+        data_percentile = np.zeros_like(data)
         
-        # Fill in data gaps with nearest valid pixel (percentile_filter doesn't understand masked arrays)
-        ind = scipy.ndimage.distance_transform_edt(data.mask, return_distances = False, return_indices = True)
-        data_percentile = data.data[tuple(ind)]
+        for feature in range(data.shape[2]):
         
-        # Calcualte filter size
-        res = md['res']
-        filter_size = int(round((float(area) / (res ** 2)) ** 0.5,0))
+            # Fill in data gaps with nearest valid pixel (percentile_filter doesn't understand masked arrays)
+            ind = scipy.ndimage.distance_transform_edt(data.mask[:,:,feature], return_distances = False, return_indices = True)
+            data_percentile[:,:,feature] = data.data[:,:,feature][tuple(ind)]
         
-        # Filter by percentile
-        data_percentile = scipy.ndimage.filters.percentile_filter(data_percentile, normalisation_percentile, size = (filter_size, filter_size))
+            # Calculate filter size
+            res = md['res']
+            filter_size = int(round((float(area) / (res ** 2)) ** 0.5,0))
+            
+            # Filter by percentile
+            data_percentile[:,:,feature] = scipy.ndimage.filters.percentile_filter(data_percentile[:,:,feature], normalisation_percentile, size = (filter_size, filter_size))
+            
+            # Replace the mask
+            data_percentile[:,:,feature] = np.ma.array(data_percentile[:,:,feature], mask = data.mask[:,:,feature])
         
-        # Replace the mask
-        data_percentile = np.ma.array(data_percentile, mask = data.mask)
-        
-    # Following Reiche et al. 2017
+    # Following Reiche et al. 2018
     if normalisation_type == 'global':
         
-        data_percentile = np.percentile(data.data[data.mask==False], normalisation_percentile)
+        data_percentile = np.zeros_like(data)
+        
+        for feature in range(data.shape[2]):
+            
+            # np.percentile doesn't understand masked arrays, so calculate percentile one feature at a time
+            data_percentile[:,:,feature] = np.percentile(data.data[:,:,feature][data.mask[:,:,feature]==False], normalisation_percentile)
     
-    # And subtract the seasqnal effect from the array
+    
+    # Get rid of residual dimensions where 2d array was input
+    data = np.squeeze(data)
+    data_percentile = np.squeeze(data_percentile)
+        
+    # And subtract the seasonal effect from the array
     data_deseasonalised = data - data_percentile 
     
     return data_deseasonalised
 
 
 
-def main(infile, sensor, extent_dest, EPSG_dest, output_res, output_dir = os.getcwd(), output_name = 'DESEASONALISED', S1_pol = 'VV', S2_res = 20, normalisation_type = 'none', normalisation_percentile = 95):
+def classify(data, image_type, nodata = 255):
+    """
+    Calculate the probability of forest
+    
+    Args:
+        data: A numpy array containing deseasonalised data
+        image_type: The source of the image, one of 'S2', 'S1single', or 'S1dual'.
+        nodata: Optionally specify a nodata value. Defaults to 255.
+        
+    Returns:
+        A numpy array containing probability of a pixel being forest in that view. Units are percent, with a nodata value set to nodata.
+    """
+    
+    assert image_type in ['S2', 'S1single', 'S1dual'], "image_type must be one of 'S2', 'S1single', or 'S1dual'. The classify() function was given %s."%image_type
+    
+    if getImageType(infile) == 'S1single':
+        p_forest = (0.644 * data) + 1.182
+        
+    elif getImageType(infile) == 'S1dual':
+        p_forest = (0.316 * data[:,:,0]) + (0.462 * data[:,:,1]) + 1.205
+    
+    elif getImageType(infile) == 'S2':
+        p_forest = (6.797 * data) + 0.759
+    
+    # Convert from odds to probability
+    p_forest = np.exp(p_forest) / (1 + np.exp(p_forest))
+    
+    # Reduce the file size by converting data to integer
+    p_forest_out = np.round(p_forest.data * 100 , 0).astype(np.uint8)
+    p_forest_out[p_forest.mask] = nodata
+    
+    return p_forest_out
+    
+
+
+def main(infile, extent_dest, EPSG_dest, output_res, output_dir = os.getcwd(), output_name = 'CLASSIFIED', normalisation_type = 'none', normalisation_percentile = 95):
     """
     """
     
-    assert sensor == 'S1' or sensor == 'S2', "Specified sensor %s is invalid."%str(sensor)
+    from osgeo import gdal
+        
     assert '_' not in output_name, "Sorry, output_name may not include the character '_'."
         
     md_dest = buildMetadataDictionary(extent_dest, output_res, EPSG_dest)
-              
-    if sensor == 'S1':
+    
+                  
+    if getImageType(infile) == 'S1single':
         
         # Get source metadata
-        extent_source, EPSG_source, res_source, date = getS1Metadata(infile, polarisation = S1_pol)
-        
-        # Build source metadata dictionary
+        extent_source, EPSG_source, res_source, date = getS1Metadata(infile)
         md_source = buildMetadataDictionary(extent_source, res_source, EPSG_source)
         
         # Load data
-        data = loadS1Gamma0(infile, polarisation = S1_pol)
+        data = loadS1Single(infile)
 
-        # Deseasonalise data
-        data_deseasonalised = deseasonalise(data, md_source, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile)
-
-        # Resample data
-        data_resampled = subset(data_deseasonalised, md_source, md_dest, dtype = 7)
-                
-        # Output data
-        output_uid = '_'.join(infile.split('/')[-1][:-4].split('_')[-4:])
-        output_filename = '%s/%s_%s_%s_%s_%s_%s.tif'%(output_dir, output_name, sensor, S1_pol, date, output_uid, 'data')       
-        ds = _createGdalDataset(md_dest, data_out = data_resampled.data, filename = output_filename, driver='GTiff', dtype=7, options=['COMPRESS=LZW'])
-
-        output_filename = '%s/%s_%s_%s_%s_%s_%s.tif'%(output_dir, output_name, sensor, S1_pol, date, output_uid, 'mask')
-        ds = _createGdalDataset(md_dest, data_out = data_resampled.mask, filename = output_filename, driver='GTiff', dtype=1, options=['COMPRESS=LZW'])
+    
+    elif getImageType(infile) == 'S1dual':
         
-    if sensor == 'S2':
+        # Get source metadata
+        extent_source, EPSG_source, res_source, date = getS1Metadata(infile)
+        md_source = buildMetadataDictionary(extent_source, res_source, EPSG_source)
+        
+        # Load data
+        data = loadS1Dual(infile)
+        
+        
+    elif getImageType(infile) == 'S2':
         
         # Get source metadata
         extent_source, EPSG_source, date = getS2Metadata(infile, resolution = S2_res)
-        
-        # Build source metadata dictionary
         md_source = buildMetadataDictionary(extent_source, S2_res, EPSG_source)
         
         # Load data
         data = loadS2NDVI(infile, S2_res)
-        
-        # Deseasonalise data
-        data_deseasonalised = deseasonalise(data, md_source, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile)
-        
-        # Resample data
-        data_resampled = subset(data_deseasonalised, md_source, md_dest, dtype = 7)
-        
-        # Output data
-        output_uid = ''.join((infile.split('/')[-1]).split('.'))
-        output_filename = '%s/%s_%s_%s_%s_%s_%s.tif'%(output_dir, output_name, sensor, str(S2_res), date, output_uid, 'data')
-        ds = _createGdalDataset(md_dest, data_out = data_resampled.data, filename = output_filename, driver='GTiff', dtype=7, options=['COMPRESS=LZW'])
+      
+    # Deseasonalise data
+    data_deseasonalised = deseasonalise(data, md_source, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile)
 
-        output_filename = '%s/%s_%s_%s_%s_%s_%s.tif'%(output_dir, output_name, sensor, str(S2_res), date, output_uid, 'mask')
-        ds = _createGdalDataset(md_dest, data_out = data_resampled.mask, filename = output_filename, driver='GTiff', dtype=1, options=['COMPRESS=LZW'])
-
-
+    # Resample data to output CRS
+    data_resampled = subset(data_deseasonalised, md_source, md_dest, dtype = 7)
+    
+    # Classify the data into probability of a pixel being forest
+    p_forest = classify(data_resampled, getImageType(infile))
+    
+    # Classify
+    #if getImageType(infile) == 'S1single':
+    #    p_forest = (0.644 * data_resampled) + 1.182
+    #    
+    #elif getImageType(infile) == 'S1dual':
+    #    p_forest = (0.316 * data_resampled[:,:,0]) + (0.462 * data_resampled[:,:,1]) + 1.205
+    #
+    #elif getImageType(infile) == 'S2':
+    #    p_forest = (6.797 * data_resampled) + 0.759
+    
+    # Convert from odds to probability
+    #p_forest = np.exp(p_forest) / (1 + np.exp(p_forest))
+    
+    #out = np.round(p_forest.data *100 , 0).astype(np.uint8)
+    #out[p_forest.mask] = 255
+    
+    uid = uuid.uuid4().hex[:6].upper()
+    
+    # Output data
+    output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), date.strftime("%Y%m%d"), uid)
+    ds = _createGdalDataset(md_dest, data_out = p_forest, filename = output_filename, nodata = 255, driver='GTiff', dtype = gdal.GDT_Byte, options=['COMPRESS=LZW'])
+    
+    
 
 if __name__ == '__main__':
     '''
@@ -466,26 +697,28 @@ if __name__ == '__main__':
 
     # Required arguments
     required.add_argument('infiles', metavar = 'FILES', type = str, nargs = '+', help = 'Sentinel-1 processed input files in .dim format or a Sentinel-2 granule. Specify a valid S1/S2 input file or multiple files through wildcards (e.g. PATH/TO/*.dim, PATH/TO.SAFE/GRANULE/*/).')
-    required.add_argument('-s', '--sensor', metavar = 'SENSOR', type = str, help = 'The name of the sensor to be processed (S1 or S2)')
     required.add_argument('-te', '--target_extent', nargs = 4, metavar = ('XMIN', 'YMIN', 'XMAX', 'YMAX'), type = float, help = "Extent of output image tile, in format <xmin, ymin, xmax, ymax>.")
     required.add_argument('-e', '--epsg', type=int, metavar = 'EPSG', help="EPSG code for output image tile CRS. This must be UTM. Find the EPSG code of your output CRS as https://www.epsg-registry.org/.")
     required.add_argument('-r', '--resolution', type=float, metavar = 'RES', help="Output resolution in m.")
     
     # Optional arguments
     optional.add_argument('-nt', '--normalisation_type', type=str, metavar = 'STR', default = 'none', help="Normalisation type. Set to one of 'none', 'local' or 'global'. Defaults to 'none'.")
-    optional.add_argument('-np', '--normalisation_percentile', type=int, metavar = 'N', default = 95, help="Normalisation percentile, in case where normalisation type set to  'local' or 'global'. Defaults to 95%.")
+    optional.add_argument('-np', '--normalisation_percentile', type=int, metavar = 'N', default = 95, help="Normalisation percentile, in case where normalisation type set to  'local' or 'global'. Defaults to 95 percent.")
     optional.add_argument('-o', '--output_dir', type=str, metavar = 'DIR', default = os.getcwd(), help="Optionally specify an output directory. If nothing specified, downloads will output to the present working directory, given a standard filename.")
-    optional.add_argument('-n', '--output_name', type=str, metavar = 'NAME', default = 'S1_output', help="Optionally specify a string to precede output filename.")
-    optional.add_argument('-i', '--S2resolution', type=int, metavar = 'RES', default = 20, help="Optionally specify an input resolution for Sentinel-2 data (10, 20, or 60). Defaults to 20 m.")
-    optional.add_argument('-p', '--polarisation', type=str, metavar = 'POL', default = 'VV', help="Optionally specify a polarisation for Sentinel-2 (VV or VH). Defaults to VV.")
-    
+    optional.add_argument('-n', '--output_name', type=str, metavar = 'NAME', default = 'CLASSIFIED', help="Optionally specify a string to precede output filename.")
+        
     # Get arguments
     args = parser.parse_args()
 
     # Get absolute path of input .safe files.
-    args.infiles = [os.path.abspath(i) for i in args.infiles]
+    infiles = [os.path.abspath(i) for i in args.infiles]
     
-    for infile in args.infiles:
+    # Slim down input files to only those that fall within tile
+    md_dest = buildMetadataDictionary(args.target_extent, args.resolution, args.epsg)
+    
+    infiles = getFilesInTile(args.infiles, md_dest)
+    
+    for infile in infiles:
         
         # Execute script
-        main(infile, args.sensor, args.target_extent, args.epsg, args.resolution, output_dir = args.output_dir, output_name = args.output_name, S1_pol = args.polarisation, S2_res = args.S2resolution, normalisation_type = args.normalisation_type, normalisation_percentile = args.normalisation_percentile)
+        main(infile, args.target_extent, args.epsg, args.resolution, output_dir = args.output_dir, output_name = args.output_name, normalisation_type = args.normalisation_type, normalisation_percentile = args.normalisation_percentile)
