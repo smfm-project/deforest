@@ -10,7 +10,6 @@ import os
 from osgeo import gdal
 import scipy.ndimage
 import xml.etree.ElementTree as ET
-import uuid
 
 import pdb
 
@@ -159,12 +158,13 @@ def getS1Metadata(dim_file):
     EPSG = int(srs.GetAttrValue("AUTHORITY", 1))
     
     # Extract date string from filename
-    datestring = root.find("Production/PRODUCT_SCENE_RASTER_START_TIME").text.split(' ')[0]
+    datestring = root.find("Production/PRODUCT_SCENE_RASTER_START_TIME").text.split('.')[0]
+    datetime = dt.datetime.strptime(datestring, '%d-%b-%Y %H:%M:%S')
     
-    # And convert to a datetime object
-    date = dt.datetime.strptime(datestring, '%d-%b-%Y').date()
+    # Get ascending/descending overpass
+    overpass = root.find("Dataset_Sources/MDElem/MDElem/MDATTR[@name='PASS']").text
     
-    return extent, EPSG, res, date
+    return extent, EPSG, res, datetime, overpass
 
 
 
@@ -216,18 +216,22 @@ def getS2Metadata(granule_file, resolution = 20):
     EPSG = root.find('n1:Geometric_Info/Tile_Geocoding/HORIZONTAL_CS_CODE',ns).text
     EPSG = int(EPSG.split(':')[1])
     
-    # Extract date string from filename
+    # Get datetime
+    datestring = root.find('n1:General_Info/SENSING_TIME',ns).text.split('.')[0]
+    datetime = dt.datetime.strptime(datestring,'%Y-%m-%dT%H:%M:%S')
     
+    # Get tile from granule filename
     if granule_file.split('/')[-1].split('_')[1] == 'USER':
+        
         # If old file format
-        date = granule_file.split('/')[-1].split('__')[1].split('_')[0].split('T')[0]
+        tile = granule_file.split('/')[-1].split('_')[-2]
+        
     else:
+        
         # If new file format
-        date = granule_file.split('/')[-1].split('_')[-1].split('T')[0]
+        tile = granule_file.split('/')[-1].split('_')[1]
     
-    date = dt.date(int(date[:4]), int(date[4:6]), int(date[6:]))
-    
-    return extent, EPSG, date
+    return extent, EPSG, datetime, tile
 
 
 
@@ -375,13 +379,13 @@ def getFilesInTile(source_files, md_dest):
                 res_source = 60
             
             # Get source file metadata if from Sentinel-2
-            extent_source, EPSG_source, date = getS2Metadata(infile, resolution = res_source)
+            extent_source, EPSG_source, datetime, tile = getS2Metadata(infile, resolution = res_source)
             
         
         elif getImageType(infile) == 'S1single' or getImageType(infile) == 'S1dual':
                         
             # Get source file metadata if from Sentinel-1
-            extent_source, EPSG_source, res_source, date = getS1Metadata(infile)            
+            extent_source, EPSG_source, res_source, datetime, overpass = getS1Metadata(infile)
              
         # Define source file metadata dictionary
         md_source = buildMetadataDictionary(extent_source, res_source, EPSG_source)
@@ -625,31 +629,44 @@ def main(infile, extent_dest, EPSG_dest, output_res, output_dir = os.getcwd(), o
     if getImageType(infile) == 'S1single':
         
         # Get source metadata
-        extent_source, EPSG_source, res_source, date = getS1Metadata(infile)
+        extent_source, EPSG_source, res_source, datetime, overpass = getS1Metadata(infile)
         md_source = buildMetadataDictionary(extent_source, res_source, EPSG_source)
         
         # Load data
         data = loadS1Single(infile)
+        
+        output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), overpass, datetime.strftime("%Y%m%d_%H%M%S"))
 
     
     elif getImageType(infile) == 'S1dual':
         
         # Get source metadata
-        extent_source, EPSG_source, res_source, date = getS1Metadata(infile)
+        extent_source, EPSG_source, res_source, datetime, overpass = getS1Metadata(infile)
         md_source = buildMetadataDictionary(extent_source, res_source, EPSG_source)
         
         # Load data
         data = loadS1Dual(infile)
         
+        output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), overpass, datetime.strftime("%Y%m%d_%H%M%S"))
         
     elif getImageType(infile) == 'S2':
         
+        # Select approprirate Sentinel-2 resolution
+        if output_res < 20:
+            S2_res = 10
+        elif output_res >= 20 and output_res < 60:
+            S2_res = 20
+        else:
+            S2_res = 60
+        
         # Get source metadata
-        extent_source, EPSG_source, date = getS2Metadata(infile, resolution = S2_res)
+        extent_source, EPSG_source, datetime, tile = getS2Metadata(infile, resolution = S2_res)
         md_source = buildMetadataDictionary(extent_source, S2_res, EPSG_source)
         
         # Load data
         data = loadS2NDVI(infile, S2_res)
+        
+        output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), tile, datetime.strftime("%Y%m%d_%H%M%S"))
       
     # Deseasonalise data
     data_deseasonalised = deseasonalise(data, md_source, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile)
@@ -659,27 +676,8 @@ def main(infile, extent_dest, EPSG_dest, output_res, output_dir = os.getcwd(), o
     
     # Classify the data into probability of a pixel being forest
     p_forest = classify(data_resampled, getImageType(infile))
-    
-    # Classify
-    #if getImageType(infile) == 'S1single':
-    #    p_forest = (0.644 * data_resampled) + 1.182
-    #    
-    #elif getImageType(infile) == 'S1dual':
-    #    p_forest = (0.316 * data_resampled[:,:,0]) + (0.462 * data_resampled[:,:,1]) + 1.205
-    #
-    #elif getImageType(infile) == 'S2':
-    #    p_forest = (6.797 * data_resampled) + 0.759
-    
-    # Convert from odds to probability
-    #p_forest = np.exp(p_forest) / (1 + np.exp(p_forest))
-    
-    #out = np.round(p_forest.data *100 , 0).astype(np.uint8)
-    #out[p_forest.mask] = 255
-    
-    uid = uuid.uuid4().hex[:6].upper()
-    
-    # Output data
-    output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), date.strftime("%Y%m%d"), uid)
+        
+    # Save data to disk
     ds = _createGdalDataset(md_dest, data_out = p_forest, filename = output_filename, nodata = 255, driver='GTiff', dtype = gdal.GDT_Byte, options=['COMPRESS=LZW'])
     
     
