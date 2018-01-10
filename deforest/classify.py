@@ -1,5 +1,6 @@
 
 import argparse
+import csv
 import datetime as dt
 import glob
 import glymur
@@ -9,6 +10,7 @@ import numpy as np
 import os
 from osgeo import gdal
 import scipy.ndimage
+
 import xml.etree.ElementTree as ET
 
 import pdb
@@ -59,6 +61,84 @@ def loadS2NDVI(L2A_file, res):
     ndvi.data[ndvi.mask] = 0.
     
     return ndvi
+
+
+def loadS2(L2A_file, res):
+    """
+    Calculate a range of vegetation indices given .SAFE file and resolution.
+    
+    Args:
+        L2A_file: A granule from a level 2A Sentinel-2 .SAFE file, processed with sen2cor.
+        res: Integer of resolution to be processed (i.e. 20 or 60 m). 
+    
+    Returns:
+        A maked numpy array of NDVI.
+    """
+    
+    # Remove trailing slash from input filename, if it exists
+    L2A_file = L2A_file.rstrip('/')
+    
+    # Identify the cloud mask following the standardised file pattern
+    mask_path = glob.glob('%s/IMG_DATA/R%sm/*_SCL_*m.jp2'%(L2A_file,str(res)))
+    
+    # In case of old file format structure, the SCL file is stored elsewhere
+    if len(mask_path) == 0:
+        mask_path = glob.glob('%s/IMG_DATA/*_SCL_*%sm.jp2'%(L2A_file,str(res)))
+            
+    # Load the cloud mask as a numpy array
+    jp2 = glymur.Jp2k(mask_path[0])
+    mask = jp2[:]
+    
+    # Convert mask to a boolean array, allowing only values of 4 (vegetation), 5 (bare sois), and 6 (water)
+    mask = np.logical_or(mask < 4, mask > 6)  
+       
+    
+    # Identify the red/NIR bands following the standardised file pattern
+    blue_path = glob.glob('%s/IMG_DATA/R%sm/*_B02_*m.jp2'%(L2A_file,str(res)))
+    green_path = glob.glob('%s/IMG_DATA/R%sm/*_B03_*m.jp2'%(L2A_file,str(res)))
+    red_path = glob.glob('%s/IMG_DATA/R%sm/*_B04_*m.jp2'%(L2A_file,str(res)))
+    nir_path = glob.glob('%s/IMG_DATA/R%sm/*_B8A_*m.jp2'%(L2A_file,str(res)))
+    swir1_path = glob.glob('%s/IMG_DATA/R%sm/*_B11_*m.jp2'%(L2A_file,str(res)))
+    swir2_path = glob.glob('%s/IMG_DATA/R%sm/*_B12_*m.jp2'%(L2A_file,str(res)))
+
+    # Load the data (as numpy array)
+    blue = np.ma.array(glymur.Jp2k(blue_path[0])[:] / 10000., mask = mask)
+    green = np.ma.array(glymur.Jp2k(green_path[0])[:] / 10000., mask = mask)
+    red = np.ma.array(glymur.Jp2k(red_path[0])[:] / 10000., mask = mask)
+    nir = np.ma.array(glymur.Jp2k(nir_path[0])[:] / 10000., mask = mask)
+    swir1 = np.ma.array(glymur.Jp2k(swir1_path[0])[:] / 10000., mask = mask)
+    swir2 = np.ma.array(glymur.Jp2k(swir2_path[0])[:] / 10000., mask = mask)
+   
+    # Calculate vegetation indices from Shultz 2016
+    indices = np.ma.zeros((mask.shape[0], mask.shape[1], 7), dtype = np.float32)
+    
+    # NDVI
+    indices[:,:,0] = (nir - red) / (nir + red)
+    
+    # EVI
+    indices[:,:,1] = ((nir - red) / (nir + 6 * red - 7.5 * blue + 1)) * 2.5
+    
+    # GEMI
+    n = (2 * (nir ** 2 - red ** 2) + 1.5 * nir + 0.5 * red) / nir + red + 0.5
+    indices[:,:,2] = (n * (1 - 0.25 * n)) - ((red - 0.125) / (1 - red))
+    
+    # NDMI
+    indices[:,:,3] = (nir - swir1) / (nir + swir1)
+    
+    # SAVI
+    indices[:,:,4] = (1 + 0.5) * ((nir - red) / (nir + red + 0.5))
+    
+    # TC wetness
+    indices[:,:,5] = 0.0315 * blue + 0.2021 * green + 0.3102 * red + 0.1594 * nir - 0.6806 * swir1 - 0.6109 * swir2
+
+    # TC greenness
+    indices[:,:,6] = -0.1603 * blue - 0.2819 * green - 0.4934 * red + 0.7940 * nir - 0.0002 * swir1 - 0.1446 * swir2
+
+    # Set masked data to 0
+    indices.data[indices.mask] = 0.
+    
+    return indices
+
 
 
 def loadS1Single(dim_file, polarisation = 'VV'):
@@ -180,7 +260,8 @@ def getS2Metadata(granule_file, resolution = 20):
         A list describing the extent of the .SAFE file granule, in the format [xmin, ymin, xmax, ymax].
         EPSG code of the coordinate reference system of the granule
     '''
-        
+    
+    
     # Remove trailing / from granule directory if present 
     granule_file = granule_file.rstrip('/')
     
@@ -188,13 +269,13 @@ def getS2Metadata(granule_file, resolution = 20):
     
     # Find the xml file that contains file metadata
     xml_file = glob.glob(granule_file + '/*MTD*.xml')[0]
-        
-    # Define xml namespace (specific to level 2A Sentinel 2 .SAFE files)
-    ns = {'n1':'https://psd-12.sentinel2.eo.esa.int/PSD/S2_PDI_Level-2A_Tile_Metadata.xsd'}
     
     # Parse xml file
     tree = ET.ElementTree(file = xml_file)
     root = tree.getroot()
+            
+    # Define xml namespace (specific to level 2A Sentinel 2 .SAFE files)
+    ns = {'n1':root.tag[1:].split('}')[0]}
     
     # Get array size
     size = root.find("n1:Geometric_Info/Tile_Geocoding/Size[@resolution='%s']"%str(resolution),ns)
@@ -343,7 +424,7 @@ def getImageType(infile):
             image_type = 'S1single'
      
     else: 
-        print 'File %s does not match any expected file pattern'%infile
+        print 'WARNING: File %s does not match any expected file pattern'%infile
         image_type = None
     
     return image_type
@@ -364,8 +445,7 @@ def getFilesInTile(source_files, md_dest):
     '''
       
     do_file = []
-
- 
+     
     for infile in source_files:
         
         if getImageType(infile) == 'S2':
@@ -579,6 +659,33 @@ def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentil
     return data_deseasonalised
 
 
+def loadCoefficients(image_type):
+    '''
+    Loads logistic regression coefficients from config .csv file.
+    
+    Args:
+        image_type: A string wih the image type (i.e. S1single, S1dual, S2)
+    Returns:
+        A list containing model coefficients, the first element being the intercept, and remaining elements coefficients in layer order.
+    '''
+    
+    # Get location of current file
+    directory = os.path.dirname(os.path.abspath(__file__))
+    
+    # Determine name of output file
+    filename = '%s/cfg/%s_coef.csv'%('/'.join(directory.split('/')[:-1]),image_type)
+    
+    # Read csv file
+    with open(filename, 'rb') as csvfile:
+        reader = csv.reader(csvfile, delimiter = ',')
+        header = reader.next()
+        
+        coef = []
+        for row in reader:
+            coef.append(float(row[1]))
+        
+    return coef
+
 
 def classify(data, image_type, nodata = 255):
     """
@@ -595,14 +702,18 @@ def classify(data, image_type, nodata = 255):
     
     assert image_type in ['S2', 'S1single', 'S1dual'], "image_type must be one of 'S2', 'S1single', or 'S1dual'. The classify() function was given %s."%image_type
     
+    coefs = loadCoefficients(getImageType(infile))
+    
     if getImageType(infile) == 'S1single':
+        # TODO: Update me
         p_forest = (0.644 * data) + 1.182
         
     elif getImageType(infile) == 'S1dual':
+        # TODO: Update me
         p_forest = (0.316 * data[:,:,0]) + (0.462 * data[:,:,1]) + 1.205
     
     elif getImageType(infile) == 'S2':
-        p_forest = (6.797 * data) + 0.759
+        p_forest = np.sum(np.array(coefs[1:]) * data, axis = 2) + coefs[0]
     
     # Convert from odds to probability
     p_forest = np.exp(p_forest) / (1 + np.exp(p_forest))
@@ -624,8 +735,7 @@ def main(infile, extent_dest, EPSG_dest, output_res, output_dir = os.getcwd(), o
     assert '_' not in output_name, "Sorry, output_name may not include the character '_'."
         
     md_dest = buildMetadataDictionary(extent_dest, output_res, EPSG_dest)
-    
-                  
+                      
     if getImageType(infile) == 'S1single':
         
         # Get source metadata
@@ -653,7 +763,7 @@ def main(infile, extent_dest, EPSG_dest, output_res, output_dir = os.getcwd(), o
         
         # Select approprirate Sentinel-2 resolution
         if output_res < 20:
-            S2_res = 10
+            S2_res = 20 #10 #TODO: Deal with loading of lower resolution images when using 10 m bands
         elif output_res >= 20 and output_res < 60:
             S2_res = 20
         else:
@@ -664,7 +774,7 @@ def main(infile, extent_dest, EPSG_dest, output_res, output_dir = os.getcwd(), o
         md_source = buildMetadataDictionary(extent_source, S2_res, EPSG_source)
         
         # Load data
-        data = loadS2NDVI(infile, S2_res)
+        data = loadS2(infile, S2_res)
         
         output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), tile, datetime.strftime("%Y%m%d_%H%M%S"))
       

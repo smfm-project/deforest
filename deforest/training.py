@@ -1,14 +1,37 @@
-# Script to extract training pixels using a shapefule to parameterise forest and nonforest PDFs
+# This is a second attempt at producing the training script.
+# It works by importing functions from classify.py, and outputting a config file to inform classify.py
 
-import numpy as np
-from osgeo import gdal, ogr, osr, gdalnumeric
-import glob
-import shapefile
-import datetime as dt
-from PIL import Image, ImageDraw
-import pdb
+import argparse
+import classify
+import csv
 import matplotlib.pyplot as plt
-import scipy.stats
+import numpy as np
+import os
+from PIL import Image, ImageDraw
+import shapefile
+from sklearn.linear_model import LogisticRegression
+
+import pdb
+
+
+def getFilesOfType(infiles, image_type):
+    '''
+    Reduce an input file list to just those files with type image_type.
+    
+    Args:
+        infiles: A list of input files of types .dim (Sentinel-1) or granules (Sentinel-2)
+        image_type: A string describing image type. This can be 'S1single', 'S1dual', or 'S2'.
+    
+    Returns:
+        A reduced list of input files
+    '''
+    
+    s = np.array([classify.getImageType(i) == image_type for i in infiles])
+        
+    return np.array(infiles)[s].tolist()
+
+
+
 
 def _coordinateTransformer(shp, EPSG_out):
     """
@@ -20,6 +43,8 @@ def _coordinateTransformer(shp, EPSG_out):
     Returns:
         A function that transforms shapefile points to EPSG.
     """
+    
+    from osgeo import ogr, osr
     
     driver = ogr.GetDriverByName('ESRI Shapefile')
     ds = driver.Open(shp)
@@ -65,25 +90,26 @@ def _world2Pixel(geo_t, x, y):
 
 
 
-def rasterizeShapefile(ds, shp, landcover):
+def rasterizeShapefile(shp, landcover, md):
     """
-    Rasterize polygons from a shapefile to match a gal raster
+    Rasterize polygons from a shapefile to match a gdal raster.
         
     Args:
-        ds: A gdal file (gdal.Open())
         shp: Path to a shapefile consisting of points, lines and/or polygons. This does not have to be in the same projection as ds
+        md: A metadata file
 
     Returns:
         A numpy array with a boolean mask delineating locations inside (True) and outside (False) the shapefile [and optional buffer].
     """
     
-    
+    from osgeo import gdalnumeric
+       
     # Create output image
-    rasterPoly = Image.new("I", (ds.RasterYSize , ds.RasterXSize), 0)
+    rasterPoly = Image.new("I", (md['ncols'] , md['nrows']), 0)
     rasterize = ImageDraw.Draw(rasterPoly)
     
     # The shapefile may not have the same CRS as the data, so this will generate a function to reproject points.
-    coordTransform = _coordinateTransformer(shp, 32736)
+    coordTransform = _coordinateTransformer(shp, md['EPSG_code'])
     
     # Read shapefile
     sf = shapefile.Reader(shp) 
@@ -110,10 +136,10 @@ def rasterizeShapefile(ds, shp, landcover):
         sxmax, symax, z = coordTransform.TransformPoint(sxmax, symax)
                 
         # Go to the next record if out of bounds
-        geo_t = ds.GetGeoTransform()
+        geo_t = md['geo_t']
         if sxmax < geo_t[0]: continue
-        if sxmin > geo_t[0] + (geo_t[1] * ds.RasterYSize): continue
-        if symax < geo_t[3] + (geo_t[5] * ds.RasterXSize): continue
+        if sxmin > geo_t[0] + (geo_t[1] * md['ncols']): continue
+        if symax < geo_t[3] + (geo_t[5] * md['nrows']): continue
         if symin > geo_t[3]: continue
         
         #Separate polygons with list indices
@@ -132,7 +158,7 @@ def rasterizeShapefile(ds, shp, landcover):
             # Transform coordinates to pixel values
             for p in points:
                 
-                # First update points from shapefile projection to ALOS mosaic projection
+                # First update points from shapefile projection to the new projection
                 E, N, z = coordTransform.TransformPoint(p[0], p[1])
 
                 # Then convert map to pixel coordinates using geo transform
@@ -158,303 +184,138 @@ def rasterizeShapefile(ds, shp, landcover):
     return mask
 
 
-
-
-##############
-## The code ##
-##############
-
-
-data_dir = '/home/sbowers3/scratch/chimanimani/L3_files/'
-shp = '/home/sbowers3/Documents/chimanimani/training_areas/training_areas.shp'
-
-# Load each image in turn, and calculate the probability of forest (from a start point of everything being forest)
-
-data_files = glob.glob(data_dir + 'chimanimaniGlobal*_data.tif')
-data_files.sort(key = lambda x: x.split('_')[4])
-data_files = np.array(data_files)
-
-mask_files = np.array([i[:-8] + 'mask.tif' for i in data_files])
-
-datestrings = [x.split('/')[-1].split('_')[3] for x in data_files]
-dates = np.array([dt.date(int(x[:4]), int(x[4:6]), int(x[6:])) for x in datestrings])
-
-sensors = np.array([x.split('/')[-1].split('_')[1] for x in data_files])
-
-pols = np.array([x.split('/')[-1].split('_')[2] for x in data_files])
-
-
-forest_S2 = []
-nonforest_S2 = []
-forest_S1_dual_VV, forest_S1_dual_VH, nonforest_S1_dual_VV, nonforest_S1_dual_VH = [], [], [], []
-forest_S1_VV, nonforest_S1_VV = [], []
-
-
-forest_landcovers = ['forest','woodland']
-nonforest_landcovers = ['agriculture','scrub','smallholders']
-
-# Get unique dates
-for date in np.unique(dates):
-     
-    if date >= dt.date(2017,1,1):
-        continue
+def saveCoefficients(logistic, image_type):
+    '''
+    Writes the coefficients from a logistic regression to a csv file in the deforest configuration directory.
     
-    if 'S2' in sensors[dates == date]:
+    Args:
+        logistic: A logistic regression object from the sklearn module
+        image_type: A string wih the image type (i.e. S1single, S1dual, S2)
+    '''
+    
+    # Get location of current file
+    directory = os.path.dirname(os.path.abspath(__file__))
+    
+    # Determine name of output file
+    filename = '%s/cfg/%s_coef.csv'%('/'.join(directory.split('/')[:-1]),image_type)
+    
+    # Write to csv file
+    with open(filename, 'wb') as csvfile:
+        writer = csv.writer(csvfile, delimiter = ',')
+        writer.writerow(['model_term','value'])
+        writer.writerow(['intercept', logistic.intercept_[0]])
         
-        s = np.logical_and(dates == date, sensors == 'S2')
+        for layer in range(logistic.coef_[0].shape[0]):
+            writer.writerow([layer,logistic.coef_[0][layer]])
+    
 
-        for data_file, mask_file in zip(data_files[s], mask_files[s]):        
-             
-            # Load file    
-            print 'Loading %s'%data_file
-            data = gdal.Open(data_file,0).ReadAsArray()
-            mask = gdal.Open(mask_file,0).ReadAsArray()
+def main(infiles, shp, image_type, normalisation_type = 'global', normalisation_percentile = 95):
+    """
+    """
+    
+    from osgeo import gdal
+    
+    # Slim down input files to only those that fall within shapefile #TODO
+    # md_dest = buildMetadataDictionary(args.target_extent, args.resolution, args.epsg)
+    # infiles = getFilesInTile(args.infiles, md_dest)
+    
+    # Slim down input files to only those of given image type
+    infiles = getFilesOfType(infiles, image_type)
+    
+    forest_px = []
+    nonforest_px = []
+    
+    for infile in infiles[:1]:
         
-            for landcover in forest_landcovers:
-
-                # Get pixels of land cover type
-                pixels = rasterizeShapefile(gdal.Open(data_file), shp, landcover)
-                forest_S2 += list(data[np.logical_and(pixels, mask == False)])
-
-            for landcover in nonforest_landcovers:
+        print 'Reading file %s'%infile.split('/')[-1]
+        
+        if image_type == 'S1single':
             
-                pixels = rasterizeShapefile(gdal.Open(data_file), shp, landcover)
-                nonforest_S2 += list(data[np.logical_and(pixels, mask == False)])
-
-    if 'S1' in sensors[dates == date]:
-        
-        if ('VV' in pols[dates == date]) and ('VH' in pols[dates == date]):
+            # Get source metadata
+            extent_source, EPSG_source, res_source, datetime, overpass = classify.getS1Metadata(infile)
+            md_source = classify.buildMetadataDictionary(extent_source, res_source, EPSG_source)
             
-            s = np.logical_and(dates == date, sensors == 'S1')
+            # Load data
+            data = classify.loadS1Single(infile)
+                    
+        elif image_type == 'S1dual':
+            
+            # Get source metadata
+            extent_source, EPSG_source, res_source, datetime, overpass = classify.getS1Metadata(infile)
+            md_source = classify.buildMetadataDictionary(extent_source, res_source, EPSG_source)
+            
+            # Load data
+            data = classify.loadS1Dual(infile)
+            
+        elif image_type == 'S2':
+                        
+            # Select appropriate Sentinel-2 resolution
+            S2_res = 20
+            
+            # Get source meL2A_T36KWD_A012244_20171026T080348tadata
+            extent_source, EPSG_source, datetime, tile = classify.getS2Metadata(infile, resolution = S2_res)
+            md_source = classify.buildMetadataDictionary(extent_source, S2_res, EPSG_source)
+            
+            # Load data
+            data = classify.loadS2(infile, S2_res)
         
-            for data_file, mask_file, pol in zip(data_files[s], mask_files[s], pols[s]):
+        # Deseasonalise data
+        data_deseasonalised = classify.deseasonalise(data, md_source, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile)
                 
-                # Load file    
-                print 'Loading %s'%data_file
-                data = gdal.Open(data_file,0).ReadAsArray()
-                mask = gdal.Open(mask_file,0).ReadAsArray()
-                
-                for landcover in forest_landcovers:
-
-                    # Get pixels of land cover type
-                    if pol == 'VH':
-                       pixels = rasterizeShapefile(gdal.Open(data_file), shp, landcover)
-                       forest_S1_dual_VH += list(data[np.logical_and(pixels, mask == False)])
-                    else:
-                       pixels = rasterizeShapefile(gdal.Open(data_file), shp, landcover)
-                       forest_S1_dual_VV += list(data[np.logical_and(pixels, mask == False)])
-
-                for landcover in nonforest_landcovers:
-
-                    # Get pixels of land cover type
-                    if pol == 'VH':
-                       pixels = rasterizeShapefile(gdal.Open(data_files[0]), shp, landcover)
-                       nonforest_S1_dual_VH += list(data[np.logical_and(pixels, mask == False)])
-                    else:
-                       pixels = rasterizeShapefile(gdal.Open(data_files[0]), shp, landcover)
-                       nonforest_S1_dual_VV += list(data[np.logical_and(pixels, mask == False)])
-
-        else:
-            
-            s = np.logical_and(dates == date, sensors == 'S1')
-            
-            for data_file, mask_file, pol in zip(data_files[s], mask_files[s], pols[s]):
-                
-                # Load file    
-                print 'Loading %s'%data_file
-                data = gdal.Open(data_file,0).ReadAsArray()
-                mask = gdal.Open(mask_file,0).ReadAsArray()
+        # Where only one predictor
+        if data_deseasonalised.ndim == 2:
+            data_deseasonalised = data_deseasonalised[:,:,np.newaxis]
         
-                for landcover in forest_landcovers:        
-                    # Get pixels of land cover type
-                    pixels = rasterizeShapefile(gdal.Open(data_file), shp, landcover)
-                    forest_S1_VV += list(data[np.logical_and(pixels, mask == False)])
-
-                for landcover in nonforest_landcovers:
-
-                    pixels = rasterizeShapefile(gdal.Open(data_files[0]), shp, landcover)
-                    nonforest_S1_VV += list(data[np.logical_and(pixels, mask == False)])
-
-
-
-            
-###########
-# Plot S2 #
-###########
-
-x = np.linspace(-1, 1, 1000)
-
-plt.hist(forest_S2,normed=True, bins = 25, alpha = 0.5, label = 'Forest', color = 'green')
-forest_mu, forest_std = scipy.stats.norm.fit(forest_S2)
-p = scipy.stats.norm.pdf(x, forest_mu, forest_std)
-plt.plot(x, p, 'green', linewidth=2)
-
-plt.hist(nonforest_S2,normed=True, bins = 25, alpha = 0.5, label = 'Nonforest', color = 'orange')
-nonforest_mu, nonforest_std = scipy.stats.norm.fit(nonforest_S2)
-p = scipy.stats.norm.pdf(x, nonforest_mu, nonforest_std)
-plt.plot(x, p, 'orange', linewidth=2)
-
-plt.legend()
-#plt.show()
-
-
-# Alternatively, we might be able to use logistic regression. This means multiple features per image is possible, which might well improve things
-
-# balanced classes
-logistic = LogisticRegression(class_weight='balanced')
-y = np.array(([1] * len(forest_S2)) + ([0] * len(nonforest_S2)))
-X = np.array(forest_S2 + nonforest_S2)[:, np.newaxis]
-logistic.fit(X,y)
-plt.plot(x, logistic.predict_proba(x[:, np.newaxis])[:,0], 'red', linewidth=2)
-
-
-plt.show()
-
-
-###########
-# Plot S1 #
-###########
-
-x = np.linspace(-10, 10, 1000)
-
-fig, ax1 = plt.subplots()
-
-ax1.hist(forest_S1_VV,normed=True, bins = 25, alpha = 0.5, label = 'Forest', color = 'green')
-forest_mu, forest_std = scipy.stats.norm.fit(forest_S1_VV)
-p = scipy.stats.norm.pdf(x, forest_mu, forest_std)
-ax1.plot(x, p, 'green', linewidth=2)
-
-ax1.hist(nonforest_S1_VV,normed=True, bins = 25, alpha = 0.5, label = 'Nonforest', color = 'orange')
-nonforest_mu, nonforest_std = scipy.stats.norm.fit(nonforest_S1_VV)
-p = scipy.stats.norm.pdf(x, nonforest_mu, nonforest_std)
-ax1.plot(x, p, 'orange', linewidth=2)
-
-plt.legend()
-#plt.show()
-
-ax2 = ax1.twinx()
-
-# Alternatively, we might be able to use logistic regression. This means multiple features per image is possible, which might well improve things
-
-from sklearn.linear_model import LogisticRegression
-logistic = LogisticRegression(class_weight='balanced')
-
-y = np.array(([1] * len(forest_S1_VV)) + ([0] * len(nonforest_S1_VV)))
-X = np.array(forest_S1_VV + nonforest_S1_VV)[:, np.newaxis]
-
-logistic.fit(X,y)
-
-ax2.plot(x, logistic.predict_proba(x[:, np.newaxis])[:,0], 'blue', linewidth=2)
-
-import scipy.stats
-# Compare this to the result from probability:
-PF = scipy.stats.norm.pdf(x, np.mean(forest_S1_VV), np.std(forest_S1_VV))
-PNF = scipy.stats.norm.pdf(x, np.mean(nonforest_S1_VV), np.std(nonforest_S1_VV))
-PNF[PNF < 1E-10000] = 0
-PNF[PNF > 0] = (PNF[PNF > 0] / (PF[PNF > 0] + PNF[PNF > 0]))
-
-ax2.plot(x, PNF, 'red', linewidth = 2)
-
-plt.show()
-
-
-
-
-
-###################
-# Plot S1 (HH/HV) #
-###################
-
-x = np.linspace(-10, 10, 1000)
-
-fig, ax1 = plt.subplots()
-
-ax1.hist(forest_S1_dual_VV,normed=True, bins = 25, alpha = 0.5, label = 'Forest', color = 'darkgreen')
-forest_mu, forest_std = scipy.stats.norm.fit(forest_S1_VV)
-p = scipy.stats.norm.pdf(x, forest_mu, forest_std)
-ax1.plot(x, p, 'green', linewidth=2)
-
-ax1.hist(nonforest_S1_dual_VV,normed=True, bins = 25, alpha = 0.5, label = 'Nonforest', color = 'darkorange')
-nonforest_mu, nonforest_std = scipy.stats.norm.fit(nonforest_S1_VV)
-p = scipy.stats.norm.pdf(x, nonforest_mu, nonforest_std)
-ax1.plot(x, p, 'orange', linewidth=2)
-
-
-ax1.hist(forest_S1_dual_VH,normed=True, bins = 25, alpha = 0.5, label = 'Forest', color = 'blue')
-forest_mu, forest_std = scipy.stats.norm.fit(forest_S1_dual_VV)
-p = scipy.stats.norm.pdf(x, forest_mu, forest_std)
-ax1.plot(x, p, 'blue', linewidth=2)
-
-ax1.hist(nonforest_S1_dual_VH,normed=True, bins = 25, alpha = 0.5, label = 'Nonforest', color = 'red')
-nonforest_mu, nonforest_std = scipy.stats.norm.fit(nonforest_S1_dual_VH)
-p = scipy.stats.norm.pdf(x, nonforest_mu, nonforest_std)
-ax1.plot(x, p, 'red', linewidth=2)
-
-
-plt.legend()
-#plt.show() 
-
-ax2 = ax1.twinx()
-
-# Alternatively, we might be able to use logistic regression. This means multiple features per image is possible, which might well improve things
-
-logistic = LogisticRegression(class_weight='balanced')
-
-# Use every 17th forest measurement to equalise sample sizes
-y = np.array(([1] * len(forest_S1_dual_VV)) + ([0] * len(nonforest_S1_dual_VV)))
-X = np.transpose(np.array([forest_S1_dual_VV + nonforest_S1_dual_VV, forest_S1_dual_VH + nonforest_S1_dual_VH]))
-#X = np.hstack((X,(X[:,0]/X[:,1])[:,None]))
-
-logistic.fit(X,y)
-
-ax2.plot(x, logistic.predict_proba(np.transpose(np.vstack((x,np.zeros_like(x)-2))))[:,0], 'blue', linewidth=2)
-
-import scipy.stats
-# Compare this to the result from probability:
-PF = scipy.stats.norm.pdf(x, np.mean(forest_S1_VV), np.std(forest_S1_VV))
-PNF = scipy.stats.norm.pdf(x, np.mean(nonforest_S1_VV), np.std(nonforest_S1_VV))
-PNF[PNF < 1E-10000] = 0
-PNF[PNF > 0] = (PNF[PNF > 0] / (PF[PNF > 0] + PNF[PNF > 0]))
-
-ax2.plot(x, PNF, 'red', linewidth = 2)
-
-plt.show()
-
-for i in range(-10,10,1):
-   plt.plot(x, logistic.predict_proba(np.transpose(np.vstack((x,np.zeros_like(x)+i))))[:,0], 'blue', linewidth=2)
-
-# VV only
-logistic = LogisticRegression(class_weight='balanced')
-y = np.array(([1] * len(forest_S1_VV)) + ([0] * len(nonforest_S1_VV)))
-X = np.array(forest_S1_VV + nonforest_S1_VV)[:, np.newaxis]
-
-logistic.fit(X,y)
-
-plt.plot(x, logistic.predict_proba(x[:,np.newaxis])[:,0], 'red', linewidth=2)
-
-logodds = (logistic.coef_[0][0]*(x[:,np.newaxis]))+logistic.intercept_[0]
-
-plt.plot(x, 1-np.exp(logodds)/(1+np.exp(logodds)), 'darkred', linewidth=2)
-
-plt.show()
-
-
-"""
-# Plot variation
-def rgb2hex(r, g, b):
-    return '#{:02x}{:02x}{:02x}'.format(int(r*255), int(g*255), int(b*255))
-
-mu_list = []
-std_list = []
-
-cmap = plt.cm.get_cmap('Spectral')
-for m in range(12):
-    mu, std = scipy.stats.norm.fit(forest[m])
-    mu_list.append(mu)
-    std_list.append(std)
-    p = scipy.stats.norm.pdf(x, mu, std)
-    RGB = cmap(float(m)/11.)
-    plt.plot(x, p, rgb2hex(RGB[0],RGB[1],RGB[2]), linewidth=2)
-
-plt.show()
-"""
+        # Get areas within shapefile
+        forest_mask = rasterizeShapefile(shp, 'forest', md_source)
+        nonforest_mask = rasterizeShapefile(shp, 'nonforest', md_source)
+        
+        # Extract data for forest training pixels
+        s = np.logical_and(forest_mask==1, np.sum(data_deseasonalised.mask,axis=2)==0)
+        forest_px.extend(data_deseasonalised[s].data.tolist())
+        
+        # Extract data for nonforest training pixels
+        s = np.logical_and(nonforest_mask==1, np.sum(data_deseasonalised.mask,axis=2)==0)
+        nonforest_px.extend(data_deseasonalised[s].data.tolist())
+    
+    forest_px = np.array(forest_px)
+    nonforest_px = np.array(nonforest_px)   
+    
+    logistic = LogisticRegression(class_weight='balanced')
+    y = np.array(([1] * forest_px.shape[0]) + ([0] * nonforest_px.shape[0]))
+    X = np.vstack((forest_px,nonforest_px))
+    logistic.fit(X,y)
+        
+    # Extract and save model coefficients
+    saveCoefficients(logistic, image_type)
+    
+    #logistic.coef_
+    #logistic.intercept_
+
+if __name__ == '__main__':
+    
+    
+    # Set up command line parser
+    parser = argparse.ArgumentParser(description = "Ingest Sentinel-1 and Sentinel-2 data to train logistic regression functions.")
+
+    parser._action_groups.pop()
+    required = parser.add_argument_group('required arguments')
+    optional = parser.add_argument_group('optional arguments')
+
+    # Required arguments
+    required.add_argument('infiles', metavar = 'FILES', type = str, nargs = '+', help = 'Sentinel-1 processed input files in .dim format or a Sentinel-2 granule. Specify a valid S1/S2 input file or multiple files through wildcards (e.g. PATH/TO/*.dim, PATH/TO.SAFE/GRANULE/*/).')
+    required.add_argument('-s', '--shapefile', metavar = 'SHP', type = str, help = 'Path to training data shapefile.')
+    required.add_argument('-t', '--image_type', metavar = 'TYPE', type = str, help = 'Image type to train (S1single, S1dual, or S2')
+    
+    # Optional arguments
+    optional.add_argument('-nt', '--normalisation_type', type=str, metavar = 'STR', default = 'none', help="Normalisation type. Set to one of 'none', 'local' or 'global'. Defaults to 'none'.")
+    optional.add_argument('-np', '--normalisation_percentile', type=int, metavar = 'N', default = 95, help="Normalisation percentile, in case where normalisation type set to  'local' or 'global'. Defaults to 95 percent.")
+
+    # Get arguments
+    args = parser.parse_args()
+
+    # Get absolute path of input .safe files.
+    infiles = [os.path.abspath(i) for i in args.infiles]
+    
+    # Execute script
+    main(infiles, args.shapefile, args.image_type, normalisation_type = args.normalisation_type, normalisation_percentile = args.normalisation_percentile)
