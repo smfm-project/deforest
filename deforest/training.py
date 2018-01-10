@@ -225,7 +225,7 @@ def main(infiles, shp, image_type, normalisation_type = 'global', normalisation_
     forest_px = []
     nonforest_px = []
     
-    for infile in infiles[:1]:
+    for infile in infiles:
         
         print 'Reading file %s'%infile.split('/')[-1]
         
