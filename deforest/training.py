@@ -258,7 +258,7 @@ def main(infiles, shp, image_type, normalisation_type = 'global', normalisation_
             
             # Load data
             data = classify.loadS2(infile, S2_res)
-        
+                
         # Deseasonalise data
         data_deseasonalised = classify.deseasonalise(data, md_source, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile)
                 
@@ -284,6 +284,9 @@ def main(infiles, shp, image_type, normalisation_type = 'global', normalisation_
     logistic = LogisticRegression(class_weight='balanced')
     y = np.array(([1] * forest_px.shape[0]) + ([0] * nonforest_px.shape[0]))
     X = np.vstack((forest_px,nonforest_px))
+    
+    assert y.shape[0] > 0, "There are no usable pixels to train the logistic regression model. Consider including more images or training locations.
+"
     logistic.fit(X,y)
         
     # Extract and save model coefficients

@@ -645,9 +645,12 @@ def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentil
         
         for feature in range(data.shape[2]):
             
-            # np.percentile doesn't understand masked arrays, so calculate percentile one feature at a time
-            data_percentile[:,:,feature] = np.percentile(data.data[:,:,feature][data.mask[:,:,feature]==False], normalisation_percentile)
-    
+            if (data.mask==False).sum() != 0:         
+                # np.percentile doesn't understand masked arrays, so calculate percentile one feature at a time
+                data_percentile[:,:,feature] = np.percentile(data.data[:,:,feature][data.mask[:,:,feature]==False], normalisation_percentile)
+            else:
+                # This catches the case where there's no usable data in an image
+                data_percentile[:,:,feature] = 0
     
     # Get rid of residual dimensions where 2d array was input
     data = np.squeeze(data)
