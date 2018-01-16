@@ -6,7 +6,13 @@
 Welcome to deforest's documentation!
 ====================================
 
+This processing chain is under construction. It will:
+
+* Take pre-processed Sentinel-1 and Sentinel-2 data as inputs
+* Output maps of forest change
+
 Contents:
+---------
 
 .. toctree::
    :maxdepth: 2
