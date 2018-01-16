@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # deforest documentation build configuration file, created by
-# sphinx-quickstart on Mon Nov 27 17:29:36 2017.
+# sphinx-quickstart on Tue Jan 16 18:16:52 2018.
 #
 # This file is execfile()d with the current directory set to its
 # containing dir.
@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.abspath('../../'))
 extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.viewcode',
+    'sphinx.ext.napoleon',
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -55,7 +56,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'deforest'
-copyright = u'2017, Samuel Bowers'
+copyright = u'2018, Samuel Bowers'
 author = u'Samuel Bowers'
 
 # The version info for the project you're documenting, acts as replacement for
