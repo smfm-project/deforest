@@ -1,0 +1,2 @@
+glymur
+scipy
