@@ -15,7 +15,7 @@ def getImageDate(infiles):
     '''
     '''
     
-    datestrings = ['_'.join(x.split('/')[-1].split('_')[1:3]) for x in infiles]
+    datestrings = ['_'.join(x.split('/')[-1].split('.')[0].split('_')[3:5]) for x in infiles]
     datetimes = np.array([dt.datetime.strptime(date,'%Y%m%d_%H%M%S') for date in datestrings],dtype='datetime64[s]')
     dates = datetimes.astype('datetime64[D]')
     
@@ -25,7 +25,8 @@ def getImageDate(infiles):
 def getImageType(infiles):
     '''
     '''
-    image_type = np.array(['_'.join(x.split('/')[-1].split('.')[-2].split('_')[3:5]) for x in infiles])
+    
+    image_type = np.array(['_'.join(x.split('/')[-1].split('.')[0].split('_')[1:3]) for x in infiles])
     
     return image_type
     
