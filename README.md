@@ -5,6 +5,9 @@
 
 ### How do I get set up? ###
 
+### What's not working yet? ###
+
+I've not yet optimised the training/classification approach. Use with caution.
 
 ### How does it work? ###
 
