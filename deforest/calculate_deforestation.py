@@ -117,8 +117,8 @@ def calculateDeforestation(infiles):
         mask = np.squeeze(mask)
             
         ## Apply block weighting/
-        PNF[PNF < 0.1] = 0.1
-        PNF[PNF > 0.9] = 0.9
+        PNF[PNF < 0.05] = 0.05
+        PNF[PNF > 0.95] = 0.95
         
         # If multiple observations from the same date exist, combine them (not performed where only one observation)
         if unique_images.shape[0] > 1:
