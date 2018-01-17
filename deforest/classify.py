@@ -16,53 +16,6 @@ import xml.etree.ElementTree as ET
 import pdb
 
 
-
-def loadS2NDVI(L2A_file, res):
-    """
-    Calculate NDVI given .SAFE file and resolution.
-    
-    Args:
-        L2A_file: A granule from a level 2A Sentinel-2 .SAFE file, processed with sen2cor.
-        res: Integer of resolution to be processed (i.e. 10 m, 20 m, or 60 m). 
-    
-    Returns:
-        A maked numpy array of NDVI.
-    """
-    
-    # Remove trailing slash from input filename, if it exists
-    L2A_file = L2A_file.rstrip('/')
-    
-    # Identify the cloud mask following the standardised file pattern
-    mask_path = glob.glob('%s/IMG_DATA/R%sm/*_SCL_*m.jp2'%(L2A_file,str(res)))
-    
-    # In case of old file format structure, the SCL file is stored elsewhere
-    if len(mask_path) == 0:
-        mask_path = glob.glob('%s/IMG_DATA/*_SCL_*%sm.jp2'%(L2A_file,str(res)))
-            
-    # Load the cloud mask as a numpy array
-    jp2 = glymur.Jp2k(mask_path[0])
-    mask = jp2[:]
-    
-    # Convert mask to a boolean array, allowing only values of 4 (vegetation), 5 (bare sois), and 6 (water)
-    mask = np.logical_or(mask < 4, mask > 6)  
-    
-    # Identify the red/NIR bands following the standardised file pattern
-    red_path = glob.glob('%s/IMG_DATA/R%sm/*_B04_*m.jp2'%(L2A_file,str(res)))
-    nir_path = glob.glob('%s/IMG_DATA/R%sm/*_B8A_*m.jp2'%(L2A_file,str(res)))
-    
-    # Load the data (as numpy array)
-    red = np.ma.array(glymur.Jp2k(red_path[0])[:] / 10000., mask = mask)
-    nir = np.ma.array(glymur.Jp2k(nir_path[0])[:] / 10000., mask = mask)
-    
-    # Calculate NDVI
-    ndvi = (nir - red) / (nir + red)
-    
-    # Set masked data to 0
-    ndvi.data[ndvi.mask] = 0.
-    
-    return ndvi
-
-
 def loadS2(L2A_file, res):
     """
     Calculate a range of vegetation indices given .SAFE file and resolution.
