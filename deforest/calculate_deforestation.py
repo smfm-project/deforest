@@ -52,16 +52,21 @@ def combineObservations(probability, mask):
     
     # Set masked elements to 1, so they have no impact on the multiplication
     probability[mask] = 1
-    
+    probability_inv = 1 - probability
+    probability_inv[mask] = 1
+     
     # Calculate probability and inverse probability
     prod = np.prod(probability, axis = 2)
-    prod_inv = np.prod(1 - probability, axis = 2)
+    prod_inv = np.prod(probability_inv, axis = 2)
     
     # Combine into a single probability
     probability = prod / (prod + prod_inv)
     
-    # Get pixels with at least one measurement
-    mask = np.sum(mask == False, axis = 2) > 0
+    # Identify pixels without a single measurement
+    mask = np.sum(mask == False, axis = 2) == 0
+    
+    # Keep things tidy
+    probability[mask] = 0.
     
     return probability, mask
 
@@ -140,8 +145,8 @@ def calculateDeforestation(infiles):
         mask = np.squeeze(mask)
             
         ## Apply block weighting/
-        PNF[PNF < 0.05] = 0.05
-        PNF[PNF > 0.95] = 0.95
+        PNF[PNF < 0.01] = 0.01
+        PNF[PNF > 0.99] = 0.99
         
         # If multiple observations from the same date exist, combine them (not performed where only one observation)
         if unique_images.shape[0] > 1:
@@ -166,7 +171,7 @@ def calculateDeforestation(infiles):
         # Step 2.2: Reject or accept previously flagged cases
         
         # Case A: Reject, where pchange falls below 50 %
-        s = np.logical_and(pchange < 0.5, deforestation == False)
+        s = np.logical_and(np.logical_and(pchange < 0.5, deforestation == False), mask == False)
         #s = np.logical_and(np.logical_and(np.logical_and(pchange < 0.5, mask == False), previous_flag == True), deforestation == False)
         deforestation_date[s] = dt.date(1970,1,1)
         pchange[s] = 0.1 # Remove?
