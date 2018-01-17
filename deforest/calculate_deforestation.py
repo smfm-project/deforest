@@ -145,8 +145,8 @@ def calculateDeforestation(infiles):
         mask = np.squeeze(mask)
             
         ## Apply block weighting/
-        PNF[PNF < 0.01] = 0.01
-        PNF[PNF > 0.99] = 0.99
+        PNF[PNF < 0.1] = 0.1
+        PNF[PNF > 0.9] = 0.9
         
         # If multiple observations from the same date exist, combine them (not performed where only one observation)
         if unique_images.shape[0] > 1:
@@ -183,8 +183,6 @@ def calculateDeforestation(infiles):
         
         # Update arrays for next round
         previous_flag[mask == False]  = flag[mask == False]
-        #previous_flag = flag.copy()
-        #PNF_last = PNF.copy()
         PNF_last[mask == False] = PNF[mask == False]    
 
     confirmed_deforestation = deforestation_date.astype('datetime64[Y]').astype(int) + 1970
