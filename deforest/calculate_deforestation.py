@@ -31,7 +31,7 @@ def getImageType(infiles):
     return image_type
     
 
-
+"""
 def combineObservations(probability, mask):
     '''
     For cases where there are more than one observations for a given day, here their forest probabilities are combined.
@@ -42,7 +42,30 @@ def combineObservations(probability, mask):
     probability_combined = np.prod(probability, axis = 2) / (np.prod(probability, axis = 2) + np.prod(1 - probability, axis = 2))
        
     return probability_combined.data, probability_combined.mask
+"""
 
+def combineObservations(probability, mask):
+    '''
+    For cases where there are more than one observations for a given day, here their forest probabilities are combined.
+    This is the second version of this function which avoids masked arrays; it should be faster.
+    '''
+    
+    # Set masked elements to 1, so they have no impact on the multiplication
+    probability[mask] = 1
+    
+    # Calculate probability and inverse probability
+    prod = np.prod(probability, axis = 2)
+    prod_inv = np.prod(1 - probability, axis = 2)
+    
+    # Combine into a single probability
+    probability = prod / (prod + prod_inv)
+    
+    # Get pixels with at least one measurement
+    mask = np.sum(mask == False, axis = 2) > 0
+    
+    return probability, mask
+
+    
 
 def bayesUpdate(prior, likelihood):
     '''
