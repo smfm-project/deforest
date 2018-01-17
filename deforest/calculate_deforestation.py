@@ -105,6 +105,7 @@ def calculateDeforestation(infiles):
                 # Paste the new data into these locations
                 p_forest[:,:,n][s] = data[s]
                 
+        #pdb.set_trace()
             
         # Change percent probability of forest to probability of non forest
         mask = p_forest == 255
@@ -124,35 +125,39 @@ def calculateDeforestation(infiles):
             
             PNF, mask = combineObservations(PNF, mask)
         
-        
-        # Flag potential changes
+        # Step 1: Flag potential changes
         flag = PNF > 0.5
             
-        # Step 2.1: Update flag and pchange for current time step
-        # Case A: A new change appears which is flagged. but not confirmed
-        s = np.logical_and(np.logical_and(np.logical_and(flag == True, previous_flag == False), mask == False), deforestation == False)
+        # Step 2.1: Update pchange for current time step
+        
+        # Case A: A new flag appears
+        s = np.logical_and(np.logical_and(np.logical_and(flag == True, previous_flag == False), deforestation == False), mask == False)
         pchange[s] = bayesUpdate(PNF_last[s], PNF[s])
         deforestation_date[s] = date
             
-        # Case B: There is a previously flagged change
-        s = np.logical_and(previous_flag == True, mask == False)
+        # Case B: There is a previously flagged change.
+        s = np.logical_and(np.logical_and(previous_flag == True, deforestation == False),  mask == False)
         pchange[s] = bayesUpdate(pchange[s], PNF[s])
         
         
         # Step 2.2: Reject or accept previously flagged cases
+        
         # Case A: Reject, where pchange falls below 50 %
-        s = np.logical_and(np.logical_and(np.logical_and(pchange < 0.5, mask == False), previous_flag == True), deforestation == False)
+        s = np.logical_and(pchange < 0.5, deforestation == False)
+        #s = np.logical_and(np.logical_and(np.logical_and(pchange < 0.5, mask == False), previous_flag == True), deforestation == False)
         deforestation_date[s] = dt.date(1970,1,1)
-        pchange[s] = 0.1
-        previous_flag[s] = False
+        pchange[s] = 0.1 # Remove?
+        flag[s] = False #previous_flag[s] = False
         
         # Case B: Confirm, where pchange > chi (hardwired to 99 %)
         s = np.logical_and(np.logical_and(pchange > 0.99, deforestation == False), mask == False)
         deforestation[s] = True
         
         # Update arrays for next round
-        previous_flag = flag.copy()
-        PNF_last = PNF.copy()    
+        previous_flag[mask == False]  = flag[mask == False]
+        #previous_flag = flag.copy()
+        #PNF_last = PNF.copy()
+        PNF_last[mask == False] = PNF[mask == False]    
 
     confirmed_deforestation = deforestation_date.astype('datetime64[Y]').astype(int) + 1970
     confirmed_deforestation[deforestation == False] = 0
