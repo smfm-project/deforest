@@ -96,11 +96,10 @@ def calculateDeforestation(infiles):
 
     YSize = ds.RasterYSize
     XSize = ds.RasterXSize
-
+    
     deforestation = np.zeros((YSize, XSize), dtype=np.bool)
-    previous_flag = np.zeros_like(deforestation, dtype=np.bool)
-    false_alarms = np.zeros_like(deforestation, dtype=np.bool)
-    PNF_last = np.zeros_like(deforestation, dtype = np.float) + 0.5 # Initialise to 0.5 probability of no forest
+    warning = np.zeros_like(deforestation, dtype=np.bool)
+    #PNF_last = np.zeros_like(deforestation, dtype = np.float) + 0.5 # Initialise to 0.5 probability of no forest
     deforestation_date = np.zeros_like(deforestation, dtype='datetime64[D]')
     pchange = np.zeros_like(deforestation, dtype=np.float)
 
@@ -156,34 +155,38 @@ def calculateDeforestation(infiles):
         # Step 1: Flag potential changes
         flag = PNF > 0.5
             
-        # Step 2.1: Update pchange for current time step
+        # Step 2: Update pchange for current time step
         
         # Case A: A new flag appears
-        s = np.logical_and(np.logical_and(np.logical_and(flag == True, previous_flag == False), deforestation == False), mask == False)
-        pchange[s] = bayesUpdate(PNF_last[s], PNF[s])
+        s = np.logical_and(np.logical_and(np.logical_and(warning == False, flag == True), deforestation == False), mask == False)
+        pchange[s] = PNF[s]
         deforestation_date[s] = date
-            
-        # Case B: There is a previously flagged change.
-        s = np.logical_and(np.logical_and(previous_flag == True, deforestation == False),  mask == False)
+        
+        # Case B: There is a warning in place, but no confirmation
+        s = np.logical_and(np.logical_and(warning == True, deforestation == False),  mask == False)
         pchange[s] = bayesUpdate(pchange[s], PNF[s])
         
         
-        # Step 2.2: Reject or accept previously flagged cases
+        # Step 3: Reject or accept warnings
         
-        # Case A: Reject, where pchange falls below 50 %
-        s = np.logical_and(np.logical_and(pchange < 0.5, deforestation == False), mask == False)
-        #s = np.logical_and(np.logical_and(np.logical_and(pchange < 0.5, mask == False), previous_flag == True), deforestation == False)
+        # Case A: Reject warning where pchange falls below 50 %
+        s = np.logical_and(np.logical_and(np.logical_and(warning == True, pchange <= 0.5), deforestation == False), mask == False)
+        warning[s] = False
+        
+        # Tidy up
         deforestation_date[s] = dt.date(1970,1,1)
-        pchange[s] = 0.1 # Remove?
-        flag[s] = False #previous_flag[s] = False
+        pchange[s] = 0.
         
-        # Case B: Confirm, where pchange > chi (hardwired to 99 %)
-        s = np.logical_and(np.logical_and(pchange > 0.99, deforestation == False), mask == False)
+        # Case B: Confirm warning where pchange > chi (hardwired to 99 %)
+        s = np.logical_and(np.logical_and(np.logical_and(warning == True, pchange > 0.99), deforestation == False), mask == False)
         deforestation[s] = True
         
+        # Update flag for next round:
+        #warning[pchange > 0.5] = True #flag = pchange > 0.5 #NEW
+        
         # Update arrays for next round
-        previous_flag[mask == False]  = flag[mask == False]
-        PNF_last[mask == False] = PNF[mask == False]    
+        #previous_flag[mask == False]  = flag[mask == False]
+        #PNF_last[mask == False] = PNF[mask == False]    
 
     confirmed_deforestation = deforestation_date.astype('datetime64[Y]').astype(int) + 1970
     confirmed_deforestation[deforestation == False] = 0
