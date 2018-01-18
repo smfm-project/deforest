@@ -161,6 +161,7 @@ def calculateDeforestation(infiles):
         s = np.logical_and(np.logical_and(np.logical_and(warning == False, flag == True), deforestation == False), mask == False)
         pchange[s] = PNF[s]
         deforestation_date[s] = date
+        warning[s] = True
         
         # Case B: There is a warning in place, but no confirmation
         s = np.logical_and(np.logical_and(warning == True, deforestation == False),  mask == False)
@@ -180,14 +181,14 @@ def calculateDeforestation(infiles):
         # Case B: Confirm warning where pchange > chi (hardwired to 99 %)
         s = np.logical_and(np.logical_and(np.logical_and(warning == True, pchange > 0.99), deforestation == False), mask == False)
         deforestation[s] = True
-        
+                
         # Update flag for next round:
         #warning[pchange > 0.5] = True #flag = pchange > 0.5 #NEW
         
         # Update arrays for next round
         #previous_flag[mask == False]  = flag[mask == False]
         #PNF_last[mask == False] = PNF[mask == False]    
-
+    
     confirmed_deforestation = deforestation_date.astype('datetime64[Y]').astype(int) + 1970
     confirmed_deforestation[deforestation == False] = 0
     confirmed_deforestation[confirmed_deforestation == 1970] = 0
