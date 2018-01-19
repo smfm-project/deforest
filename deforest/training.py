@@ -229,36 +229,9 @@ def main(infiles, shp, image_type, normalisation_type = 'global', normalisation_
         
         print 'Reading file %s'%infile.split('/')[-1]
         
-        if image_type == 'S1single':
-            
-            # Get source metadata
-            extent_source, EPSG_source, res_source, datetime, overpass = classify.getS1Metadata(infile)
-            md_source = classify.buildMetadataDictionary(extent_source, res_source, EPSG_source)
-            
-            # Load data
-            data = classify.loadS1Single(infile)
-                    
-        elif image_type == 'S1dual':
-            
-            # Get source metadata
-            extent_source, EPSG_source, res_source, datetime, overpass = classify.getS1Metadata(infile)
-            md_source = classify.buildMetadataDictionary(extent_source, res_source, EPSG_source)
-            
-            # Load data
-            data = classify.loadS1Dual(infile)
-            
-        elif image_type == 'S2':
-                        
-            # Select appropriate Sentinel-2 resolution
-            S2_res = 20
-            
-            # Get source meL2A_T36KWD_A012244_20171026T080348tadata
-            extent_source, EPSG_source, datetime, tile = classify.getS2Metadata(infile, resolution = S2_res)
-            md_source = classify.buildMetadataDictionary(extent_source, S2_res, EPSG_source)
-            
-            # Load data
-            data = classify.loadS2(infile, S2_res)
-                
+        # Load data, source metadata, and generate an output filename. 
+        data, md_source, output_filename = classify.loadData(infile)
+         
         # Deseasonalise data
         data_deseasonalised = classify.deseasonalise(data, md_source, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile)
                 
@@ -281,6 +254,8 @@ def main(infiles, shp, image_type, normalisation_type = 'global', normalisation_
     forest_px = np.array(forest_px)
     nonforest_px = np.array(nonforest_px)   
     
+    pdb.set_trace()
+     
     logistic = LogisticRegression(class_weight='balanced')
     y = np.array(([1] * forest_px.shape[0]) + ([0] * nonforest_px.shape[0]))
     X = np.vstack((forest_px,nonforest_px))
