@@ -10,7 +10,6 @@ import numpy as np
 import os
 from osgeo import gdal
 import scipy.ndimage
-
 import xml.etree.ElementTree as ET
 
 import pdb
@@ -680,7 +679,61 @@ def classify(data, image_type, nodata = 255):
     
     return p_forest_out
     
+    
+def loadData(infile):
+    '''
+    Loads data and metadata from a Sentinel-1 or Sentinel-2 file
+    
+    Args:
+        infile: Path to a Sentinel-1 .dim file or a Sentinel-2 GRANULE directory.
+    Returns:
+        A numpy array containing data, a dictionary containing file metadata, and a proposed output filename.
+    '''
+    
+    # Get source metadata
+    if getImageType(infile) == 'S1single' or getImageType(infile) == 'S1dual':
+        extent_source, EPSG_source, res_source, datetime, overpass = getS1Metadata(infile)
+    
+    elif getImageType(infile) == 'S2':
+    
+        # Select appropriate Sentinel-2 resolution
+        if output_res < 20:
+            S2_res = 20 #10 #TODO: Deal with loading of lower resolution images when using 10 m bands
+        elif output_res >= 20 and output_res < 60:
+            S2_res = 20
+        else:
+            S2_res = 60
 
+        extent_source, EPSG_source, datetime, tile = getS2Metadata(infile, resolution = S2_res)
+    
+    else:
+        print 'WARNING: infile %s does not match any known ImageTypes'%infile
+
+    # Build metadata dictionary    
+    md_source = buildMetadataDictionary(extent_source, res_source, EPSG_source)
+    
+    # Load data using appropriate function
+    if getImageType(infile) == 'S1single':    
+        data = loadS1Single(infile)
+        output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), overpass, datetime.strftime("%Y%m%d_%H%M%S"))
+    
+    elif getImageType(infile) == 'S1dual':
+        data = loadS1Dual(infile)
+        output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), overpass, datetime.strftime("%Y%m%d_%H%M%S"))
+    
+    elif getImageType(infile) == 'S2':
+        data = loadS2(infile, S2_res)
+        output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), tile, datetime.strftime("%Y%m%d_%H%M%S"))
+
+    else:
+        print 'WARNING: infile %s does not match any known ImageTypes'%infile
+
+    return data, md_source, output_filename
+
+
+    
+        
+    
 
 def main(infile, extent_dest, EPSG_dest, output_res, output_dir = os.getcwd(), output_name = 'CLASSIFIED', normalisation_type = 'none', normalisation_percentile = 95):
     """
@@ -689,51 +742,13 @@ def main(infile, extent_dest, EPSG_dest, output_res, output_dir = os.getcwd(), o
     from osgeo import gdal
         
     assert '_' not in output_name, "Sorry, output_name may not include the character '_'."
-        
-    md_dest = buildMetadataDictionary(extent_dest, output_res, EPSG_dest)
-                      
-    if getImageType(infile) == 'S1single':
-        
-        # Get source metadata
-        extent_source, EPSG_source, res_source, datetime, overpass = getS1Metadata(infile)
-        md_source = buildMetadataDictionary(extent_source, res_source, EPSG_source)
-        
-        # Load data
-        data = loadS1Single(infile)
-        
-        output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), overpass, datetime.strftime("%Y%m%d_%H%M%S"))
-
     
-    elif getImageType(infile) == 'S1dual':
-        
-        # Get source metadata
-        extent_source, EPSG_source, res_source, datetime, overpass = getS1Metadata(infile)
-        md_source = buildMetadataDictionary(extent_source, res_source, EPSG_source)
-        
-        # Load data
-        data = loadS1Dual(infile)
-        
-        output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), overpass, datetime.strftime("%Y%m%d_%H%M%S"))
-        
-    elif getImageType(infile) == 'S2':
-        
-        # Select approprirate Sentinel-2 resolution
-        if output_res < 20:
-            S2_res = 20 #10 #TODO: Deal with loading of lower resolution images when using 10 m bands
-        elif output_res >= 20 and output_res < 60:
-            S2_res = 20
-        else:
-            S2_res = 60
-        
-        # Get source metadata
-        extent_source, EPSG_source, datetime, tile = getS2Metadata(infile, resolution = S2_res)
-        md_source = buildMetadataDictionary(extent_source, S2_res, EPSG_source)
-        
-        # Load data
-        data = loadS2(infile, S2_res)
-        
-        output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), tile, datetime.strftime("%Y%m%d_%H%M%S"))
-      
+    # Load data, source metadata, and generate an output filename. 
+    data, md_source, output_filename = loadData(infile)
+    
+    # Generate output metadata
+    md_dest = buildMetadataDictionary(extent_dest, output_res, EPSG_dest)
+    
     # Deseasonalise data
     data_deseasonalised = deseasonalise(data, md_source, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile)
 
