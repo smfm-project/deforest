@@ -184,32 +184,25 @@ def rasterizeShapefile(shp, landcover, md):
     return mask
 
 
-def saveCoefficients(logistic, image_type):
-    '''
-    Writes the coefficients from a logistic regression to a csv file in the deforest configuration directory.
+def outputData(forest_px, nonforest_px, image_type, output_dir = os.getcwd()):
+    """
+    Save data to a .npz file for analysis in model fitting script.
     
     Args:
-        logistic: A logistic regression object from the sklearn module
-        image_type: A string wih the image type (i.e. S1single, S1dual, S2)
-    '''
+        forest_px: List of pixel values representing forest.
+        nonforest_px: List of pixel values representing nonforest
+        image_type: String to represent image type (e.g. S1single, S1dual, S2)
+        output_dir: Directory to output .npz file. Defaults to current working directory.
+    """
+
+    forest_px = np.array(forest_px)
+    nonforest_px = np.array(nonforest_px)
     
-    # Get location of current file
-    directory = os.path.dirname(os.path.abspath(__file__))
-    
-    # Determine name of output file
-    filename = '%s/cfg/%s_coef.csv'%('/'.join(directory.split('/')[:-1]),image_type)
-    
-    # Write to csv file
-    with open(filename, 'wb') as csvfile:
-        writer = csv.writer(csvfile, delimiter = ',')
-        writer.writerow(['model_term','value'])
-        writer.writerow(['intercept', logistic.intercept_[0]])
-        
-        for layer in range(logistic.coef_[0].shape[0]):
-            writer.writerow([layer,logistic.coef_[0][layer]])
+    np.savez('%s/%s_training_data.npz'%(output_dir, image_type), forest_px = forest_px, nonforest_px = nonforest_px)
     
 
-def main(infiles, shp, image_type, normalisation_type = 'global', normalisation_percentile = 95):
+
+def main(infiles, shp, image_type, normalisation_type = 'global', normalisation_percentile = 95, output_dir = os.getcwd()):
     """
     """
     
@@ -230,7 +223,7 @@ def main(infiles, shp, image_type, normalisation_type = 'global', normalisation_
         print 'Reading file %s'%infile.split('/')[-1]
         
         # Load data, source metadata, and generate an output filename. 
-        data, md_source, output_filename = classify.loadData(infile)
+        data, md_source, output_filename = classify.loadData(infile, S2_res = 20)
          
         # Deseasonalise data
         data_deseasonalised = classify.deseasonalise(data, md_source, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile)
@@ -251,30 +244,15 @@ def main(infiles, shp, image_type, normalisation_type = 'global', normalisation_
         s = np.logical_and(nonforest_mask==1, np.sum(data_deseasonalised.mask,axis=2)==0)
         nonforest_px.extend(data_deseasonalised[s].data.tolist())
     
-    forest_px = np.array(forest_px)
-    nonforest_px = np.array(nonforest_px)   
-    
-    pdb.set_trace()
-     
-    logistic = LogisticRegression(class_weight='balanced')
-    y = np.array(([1] * forest_px.shape[0]) + ([0] * nonforest_px.shape[0]))
-    X = np.vstack((forest_px,nonforest_px))
-    
-    assert y.shape[0] > 0, "There are no usable pixels to train the logistic regression model. Consider including more images or training locations."
-    
-    logistic.fit(X,y)
-        
-    # Extract and save model coefficients
-    saveCoefficients(logistic, image_type)
-    
-    #logistic.coef_
-    #logistic.intercept_
+    # Output data
+    outputData(forest_px, nonforest_px, image_type, output_dir = output_dir)
+
 
 if __name__ == '__main__':
     
     
     # Set up command line parser
-    parser = argparse.ArgumentParser(description = "Ingest Sentinel-1 and Sentinel-2 data to train logistic regression functions.")
+    parser = argparse.ArgumentParser(description = "Extract data from Sentinel-1 and Sentinel-2 data to train logistic regression functions.")
 
     parser._action_groups.pop()
     required = parser.add_argument_group('required arguments')
@@ -288,6 +266,7 @@ if __name__ == '__main__':
     # Optional arguments
     optional.add_argument('-nt', '--normalisation_type', type=str, metavar = 'STR', default = 'none', help="Normalisation type. Set to one of 'none', 'local' or 'global'. Defaults to 'none'.")
     optional.add_argument('-np', '--normalisation_percentile', type=int, metavar = 'N', default = 95, help="Normalisation percentile, in case where normalisation type set to  'local' or 'global'. Defaults to 95 percent.")
+    optional.add_argument('-o', '--output_dir', type=str, metavar = 'PATH', default = os.getcwd(), help="Directory to output training data.")
 
     # Get arguments
     args = parser.parse_args()
@@ -296,4 +275,4 @@ if __name__ == '__main__':
     infiles = [os.path.abspath(i) for i in args.infiles]
     
     # Execute script
-    main(infiles, args.shapefile, args.image_type, normalisation_type = args.normalisation_type, normalisation_percentile = args.normalisation_percentile)
+    main(infiles, args.shapefile, args.image_type, normalisation_type = args.normalisation_type, normalisation_percentile = args.normalisation_percentile, output_dir = args.output_dir)

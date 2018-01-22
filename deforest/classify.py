@@ -621,7 +621,8 @@ def loadCoefficients(image_type):
     Args:
         image_type: A string wih the image type (i.e. S1single, S1dual, S2)
     Returns:
-        A list containing model coefficients, the first element being the intercept, and remaining elements coefficients in layer order.
+        An array containing model coefficients, the first element being the intercept, and remaining elements coefficients in layer order.
+        Arrays containing the mean and scaling parameters to transform the imput image.
     '''
     
     # Get location of current file
@@ -636,10 +637,30 @@ def loadCoefficients(image_type):
         header = reader.next()
         
         coef = []
+        mean = []
+        scale = []
+
         for row in reader:
             coef.append(float(row[1]))
-        
-    return coef
+            mean.append(float(row[2]))
+            scale.append(float(row[3]))
+       
+    return np.array(coef), np.array(mean), np.array(scale)
+
+
+def rescaleData(data, means, scales):
+    '''
+    Rescale data to match the scaling of training data
+    
+    Args:
+        data: A numpy array containing deseasonalised data
+        means:  A numpy array containing the mean parameters to transform the imput image.
+        scales:  A numpy array containing the scaling parameters to transform the imput image.
+    Returns:
+        The rescaled data array
+    '''
+    
+    return (data - means[1:]) / scales[1:]
 
 
 def classify(data, image_type, nodata = 255):
@@ -657,7 +678,7 @@ def classify(data, image_type, nodata = 255):
     
     assert image_type in ['S2', 'S1single', 'S1dual'], "image_type must be one of 'S2', 'S1single', or 'S1dual'. The classify() function was given %s."%image_type
     
-    coefs = loadCoefficients(getImageType(infile))
+    coefs, means, scales = loadCoefficients(getImageType(infile))
     
     if getImageType(infile) == 'S1single':
         # TODO: Update me
@@ -668,7 +689,8 @@ def classify(data, image_type, nodata = 255):
         p_forest = (0.316 * data[:,:,0]) + (0.462 * data[:,:,1]) + 1.205
     
     elif getImageType(infile) == 'S2':
-        p_forest = np.sum(np.array(coefs[1:]) * data, axis = 2) + coefs[0]
+        
+        p_forest = np.sum(coefs[1:] * rescaleData(data, means, scales), axis = 2) + coefs[0]
     
     # Convert from odds to probability
     p_forest = np.exp(p_forest) / (1 + np.exp(p_forest))
@@ -680,12 +702,13 @@ def classify(data, image_type, nodata = 255):
     return p_forest_out
     
     
-def loadData(infile):
+def loadData(infile, S2_res = 20, output_dir = os.getcwd(), output_name = 'CLASSIFIED'):
     '''
     Loads data and metadata from a Sentinel-1 or Sentinel-2 file
     
     Args:
         infile: Path to a Sentinel-1 .dim file or a Sentinel-2 GRANULE directory.
+        output_res: Output resolution, important for selecting correct Sentinel-2 file.
     Returns:
         A numpy array containing data, a dictionary containing file metadata, and a proposed output filename.
     '''
@@ -696,14 +719,8 @@ def loadData(infile):
     
     elif getImageType(infile) == 'S2':
     
-        # Select appropriate Sentinel-2 resolution
-        if output_res < 20:
-            S2_res = 20 #10 #TODO: Deal with loading of lower resolution images when using 10 m bands
-        elif output_res >= 20 and output_res < 60:
-            S2_res = 20
-        else:
-            S2_res = 60
-
+        # Select appropriate Sentinel-2 resolution. TODO: Deal with loading most appropriate scale
+        res_source = S2_res
         extent_source, EPSG_source, datetime, tile = getS2Metadata(infile, resolution = S2_res)
     
     else:
@@ -722,7 +739,7 @@ def loadData(infile):
         output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), overpass, datetime.strftime("%Y%m%d_%H%M%S"))
     
     elif getImageType(infile) == 'S2':
-        data = loadS2(infile, S2_res)
+        data = loadS2(infile, res_source)
         output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), tile, datetime.strftime("%Y%m%d_%H%M%S"))
 
     else:
@@ -743,8 +760,8 @@ def main(infile, extent_dest, EPSG_dest, output_res, output_dir = os.getcwd(), o
         
     assert '_' not in output_name, "Sorry, output_name may not include the character '_'."
     
-    # Load data, source metadata, and generate an output filename. 
-    data, md_source, output_filename = loadData(infile)
+    # Load data, source metadata, and generate an output filename. S2_res currently hardwired. TODO: Deal with loading most appropriate data
+    data, md_source, output_filename = loadData(infile, S2_res = 20, output_dir = output_dir, output_name = output_name)
     
     # Generate output metadata
     md_dest = buildMetadataDictionary(extent_dest, output_res, EPSG_dest)
