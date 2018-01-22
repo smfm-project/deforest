@@ -81,6 +81,8 @@ def bayesUpdate(prior, likelihood):
     return posterior
 
 
+
+
 def calculateDeforestation(infiles):
     '''
     '''
@@ -132,8 +134,6 @@ def calculateDeforestation(infiles):
                 # Paste the new data into these locations
                 p_forest[:,:,n][s] = data[s]
                 
-        #pdb.set_trace()
-            
         # Change percent probability of forest to probability of non forest
         mask = p_forest == 255
         PNF = (100 - p_forest) / 100.
@@ -187,7 +187,24 @@ def calculateDeforestation(infiles):
         
         # Update arrays for next round
         #previous_flag[mask == False]  = flag[mask == False]
-        #PNF_last[mask == False] = PNF[mask == False]    
+        #PNF_last[mask == False] = PNF[mask == False]
+        
+        # Quick and dirty animation
+        fig = plt.figure(figsize=(10,10))
+        ax1 = plt.subplot2grid((2, 2), (0, 0), rowspan=2, colspan=1)
+        cax1 = ax1.imshow(pchange,vmin=0,vmax=100, cmap='viridis', interpolation='nearest')
+        fig.colorbar(cax1, fraction=0.046, pad=0.04)
+        ax1.set_title('pForest (date %s)'%infile.split('_')[-2])
+        ax1.axis('off')
+        ax2 = plt.subplot2grid((2, 2), (0, 1), rowspan=2, colspan=1)
+        cax2 = ax2.imshow(warning*1 + deforestation*2,vmin=0,vmax=2,cmap='YlOrRd', interpolation='nearest')
+        fig.colorbar(cax2, fraction=0.046, pad=0.04)
+        ax2.set_title('warning/defor (date %s)'%infile.split('_')[-2])
+        ax2.axis('off')
+        plt.tight_layout()
+        plt.savefig('/exports/csce/eddie/geos/groups/SMFM/anim/%s'%infile.split('/')[-1].split('_')[-2]+'_anim.png',dpi=200)
+        plt.close()
+ 
     
     confirmed_deforestation = deforestation_date.astype('datetime64[Y]').astype(int) + 1970
     confirmed_deforestation[deforestation == False] = 0
