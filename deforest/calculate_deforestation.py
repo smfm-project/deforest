@@ -192,7 +192,7 @@ def calculateDeforestation(infiles):
         # Quick and dirty animation
         fig = plt.figure(figsize=(10,10))
         ax1 = plt.subplot2grid((2, 2), (0, 0), rowspan=2, colspan=1)
-        cax1 = ax1.imshow(pchange,vmin=0,vmax=100, cmap='viridis', interpolation='nearest')
+        cax1 = ax1.imshow(pchange,vmin=0,vmax=1., cmap='viridis', interpolation='nearest')
         fig.colorbar(cax1, fraction=0.046, pad=0.04)
         ax1.set_title('pForest (date %s)'%infile.split('_')[-2])
         ax1.axis('off')
