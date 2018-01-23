@@ -99,6 +99,9 @@ def calculateDeforestation(infiles):
     YSize = ds.RasterYSize
     XSize = ds.RasterXSize
     
+    YSize = 2000
+    XSize = 2000
+    
     deforestation = np.zeros((YSize, XSize), dtype=np.bool)
     warning = np.zeros_like(deforestation, dtype=np.bool)
     #PNF_last = np.zeros_like(deforestation, dtype = np.float) + 0.5 # Initialise to 0.5 probability of no forest
@@ -126,7 +129,7 @@ def calculateDeforestation(infiles):
             for infile in infiles[np.logical_and(dates == date, image_type == this_image_type)]:
                     
                 print 'Loading %s'%infile
-                data = gdal.Open(infile,0).ReadAsArray()
+                data = gdal.Open(infile,0).ReadAsArray()[3000:5000,1000:3000]
                 
                 # Select areas that still have the nodata value
                 s = p_forest[:,:,n] == 255
@@ -188,21 +191,21 @@ def calculateDeforestation(infiles):
         # Update arrays for next round
         #previous_flag[mask == False]  = flag[mask == False]
         #PNF_last[mask == False] = PNF[mask == False]
-        
+        #pdb.set_trace() 
         # Quick and dirty animation
-        fig = plt.figure(figsize=(10,10))
-        ax1 = plt.subplot2grid((2, 2), (0, 0), rowspan=2, colspan=1)
+        fig = plt.figure(figsize=(10,5))
+        ax1 = plt.subplot2grid((1, 2), (0, 0), rowspan=1, colspan=1)
         cax1 = ax1.imshow(pchange,vmin=0,vmax=1., cmap='viridis', interpolation='nearest')
         fig.colorbar(cax1, fraction=0.046, pad=0.04)
         ax1.set_title('pForest (date %s)'%infile.split('_')[-2])
         ax1.axis('off')
-        ax2 = plt.subplot2grid((2, 2), (0, 1), rowspan=2, colspan=1)
+        ax2 = plt.subplot2grid((1, 2), (0, 1), rowspan=1, colspan=1)
         cax2 = ax2.imshow(warning*1 + deforestation*2,vmin=0,vmax=2,cmap='YlOrRd', interpolation='nearest')
         fig.colorbar(cax2, fraction=0.046, pad=0.04)
         ax2.set_title('warning/defor (date %s)'%infile.split('_')[-2])
         ax2.axis('off')
         plt.tight_layout()
-        plt.savefig('/exports/csce/eddie/geos/groups/SMFM/anim/%s'%infile.split('/')[-1].split('_')[-2]+'_anim.png',dpi=200)
+        plt.savefig('/exports/csce/eddie/geos/groups/SMFM/anim/%s'%infile.split('/')[-1].split('_')[-2]+'_anim.png',dpi=100)
         plt.close()
  
     
