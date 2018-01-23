@@ -244,8 +244,8 @@ def main(infiles, shp, image_type, normalisation_type = 'global', normalisation_
         s = np.logical_and(nonforest_mask==1, np.sum(data_deseasonalised.mask,axis=2)==0)
         nonforest_px.extend(data_deseasonalised[s].data.tolist())
     
-    # Output data
-    outputData(forest_px, nonforest_px, image_type, output_dir = output_dir)
+        # Output data (as we go)
+        outputData(forest_px, nonforest_px, image_type, output_dir = output_dir)
 
 
 if __name__ == '__main__':
