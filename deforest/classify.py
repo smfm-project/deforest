@@ -4,13 +4,13 @@ import csv
 import datetime as dt
 import glob
 import glymur
+import lxml.etree as ET
 import matplotlib.pyplot as plt
 import multiprocessing
 import numpy as np
 import os
 from osgeo import gdal
 import scipy.ndimage
-import xml.etree.ElementTree as ET
 
 import pdb
 
@@ -212,7 +212,8 @@ def getS2Metadata(granule_file, resolution = 20):
         A list describing the extent of the .SAFE file granule, in the format [xmin, ymin, xmax, ymax].
         EPSG code of the coordinate reference system of the granule
     '''
-    
+
+    import lxml.etree as ET
     
     # Remove trailing / from granule directory if present 
     granule_file = granule_file.rstrip('/')
@@ -230,12 +231,12 @@ def getS2Metadata(granule_file, resolution = 20):
     ns = {'n1':root.tag[1:].split('}')[0]}
     
     # Get array size
-    size = root.find("n1:Geometric_Info/Tile_Geocoding/Size[@resolution='%s']"%str(resolution),ns)
+    size = root.find("n1:Geometric_Info/Tile_Geocoding[@metadataLevel='Brief']/Size[@resolution='%s']"%str(resolution),ns)
     nrows = int(size.find('NROWS').text)
     ncols = int(size.find('NCOLS').text)
     
     # Get extent data
-    geopos = root.find("n1:Geometric_Info/Tile_Geocoding/Geoposition[@resolution='%s']"%str(resolution),ns)
+    geopos = root.find("n1:Geometric_Info/Tile_Geocoding[@metadataLevel='Brief']/Geoposition[@resolution='%s']"%str(resolution),ns)
     ulx = float(geopos.find('ULX').text)
     uly = float(geopos.find('ULY').text)
     xres = float(geopos.find('XDIM').text)
@@ -246,11 +247,11 @@ def getS2Metadata(granule_file, resolution = 20):
     extent = [ulx, lry, lrx, uly]
     
     # Find EPSG code to define projection
-    EPSG = root.find('n1:Geometric_Info/Tile_Geocoding/HORIZONTAL_CS_CODE',ns).text
+    EPSG = root.find("n1:Geometric_Info/Tile_Geocoding[@metadataLevel='Brief']/HORIZONTAL_CS_CODE",ns).text
     EPSG = int(EPSG.split(':')[1])
     
     # Get datetime
-    datestring = root.find('n1:General_Info/SENSING_TIME',ns).text.split('.')[0]
+    datestring = root.find("n1:General_Info/SENSING_TIME[@metadataLevel='Standard']",ns).text.split('.')[0]
     datetime = dt.datetime.strptime(datestring,'%Y-%m-%dT%H:%M:%S')
     
     # Get tile from granule filename
