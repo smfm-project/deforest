@@ -200,7 +200,7 @@ def outputData(forest_px, nonforest_px,  forest_px_date, nonforest_px_date, imag
     nonforest_px = np.array(nonforest_px)
     
     forest_px_date = np.array(forest_px_date, dtype='datetime64[D]')
-    nonforest_px_date = np.array(forest_px_date, dtype='datetime64[D]')
+    nonforest_px_date = np.array(nonforest_px_date, dtype='datetime64[D]')
     
     np.savez('%s/%s_training_data.npz'%(output_dir, image_type), forest_px = forest_px, nonforest_px = nonforest_px, forest_px_date = forest_px_date, nonforest_px_date = nonforest_px_date)
     
