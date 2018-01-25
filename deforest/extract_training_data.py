@@ -185,7 +185,7 @@ def rasterizeShapefile(shp, landcover, md):
     return mask
 
 
-def outputData(forest_px, nonforest_px,  forest_px_date, nonforest_px_date, image_type, output_dir = os.getcwd()):
+def outputData(forest_px, nonforest_px, image_type, output_dir = os.getcwd()):
     """
     Save data to a .npz file for analysis in model fitting script.
     
@@ -199,11 +199,7 @@ def outputData(forest_px, nonforest_px,  forest_px_date, nonforest_px_date, imag
     forest_px = np.array(forest_px)
     nonforest_px = np.array(nonforest_px)
     
-    forest_px_date = np.array(forest_px_date, dtype='datetime64[D]')
-    nonforest_px_date = np.array(nonforest_px_date, dtype='datetime64[D]')
-    
-    np.savez('%s/%s_training_data.npz'%(output_dir, image_type), forest_px = forest_px, nonforest_px = nonforest_px, forest_px_date = forest_px_date, nonforest_px_date = nonforest_px_date)
-    
+    np.savez('%s/%s_training_data.npz'%(output_dir, image_type), forest_px = forest_px, nonforest_px = nonforest_px) 
 
 
 def main(infiles, shp, image_type, normalisation_type = 'global', normalisation_percentile = 95, output_dir = os.getcwd()):
@@ -221,9 +217,6 @@ def main(infiles, shp, image_type, normalisation_type = 'global', normalisation_
     
     forest_px = []
     nonforest_px = []
-    forest_px_date = []
-    nonforest_px_date = []
-
     
     for infile in infiles:
         
@@ -251,18 +244,12 @@ def main(infiles, shp, image_type, normalisation_type = 'global', normalisation_
         s = np.logical_and(forest_mask==1, np.sum(data_deseasonalised.mask,axis=2)==0)
         forest_px.extend(data_deseasonalised[s].data.tolist())
         
-        # Extend date. TODO: something more elegant
-        forest_px_date.extend([date]*np.sum(s))
-        
         # Extract data for nonforest training pixels
         s = np.logical_and(nonforest_mask==1, np.sum(data_deseasonalised.mask,axis=2)==0)
         nonforest_px.extend(data_deseasonalised[s].data.tolist())
         
-        # Extend date. TODO: something more elegant
-        nonforest_px_date.extend([date]*np.sum(s))
-        
         # Output data (as we go)
-        outputData(forest_px, nonforest_px, forest_px_date, nonforest_px_date, image_type, output_dir = output_dir)
+        outputData(forest_px, nonforest_px, image_type, output_dir = output_dir)
 
 
 if __name__ == '__main__':

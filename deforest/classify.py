@@ -93,8 +93,8 @@ def loadS2(L2A_file, res):
     doy = (datetime.date() - dt.date(datetime.year,1,1)).days
     
     # Two seasonal predictors (trigonometric)
-    indices[:,:,7] = np.sin(2 * np.pi * (doy / 365.))
-    indices[:,:,8] = np.cos(2 * np.pi * (doy / 365.))
+    indices[:,:,7] = np.ma.array(indices[:,:,7] + np.sin(2 * np.pi * (doy / 365.)), mask = mask)
+    indices[:,:,8] = np.ma.array(indices[:,:,8] + np.cos(2 * np.pi * (doy / 365.)), mask = mask)
     
     # Set masked data to 0
     indices.data[indices.mask] = 0.
@@ -172,8 +172,8 @@ def loadS1Dual(dim_file):
     # Calculate day of year 
     doy = (datetime.date() - dt.date(datetime.year,1,1)).days
     
-    doy_X = np.zeros_like(VV) + np.sin(2 * np.pi * (doy / 365.))
-    doy_Y = np.zeros_like(VV) + np.cos(2 * np.pi * (doy / 365.))
+    doy_X = np.ma.array(np.zeros_like(VV) + np.sin(2 * np.pi * (doy / 365.)), mask = VV.mask)
+    doy_Y = np.ma.array(np.zeros_like(VV) + np.cos(2 * np.pi * (doy / 365.)), mask = VV.mask)
     
     return np.ma.dstack((VV, VH, VV_VH, doy_X, doy_Y))
 

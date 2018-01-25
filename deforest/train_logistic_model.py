@@ -14,19 +14,6 @@ def _getCfgDir():
     return '/'.join(os.path.dirname(os.path.realpath(__file__)).split('/')[:-1]) + '/cfg/'
 
 
-def getDatePredictors(date_array):
-    '''
-    '''
-    
-    doy = (date_array - date_array.astype('datetime64[Y]')).astype(np.int)
-    
-    # Two seasonal predictors (trigonometric)
-    x_day = np.sin(2 * np.pi * (doy / 365.))
-    y_day = np.cos(2 * np.pi * (doy / 365.))
-     
-    return np.vstack((x_day, y_day)).T
-    
-
 def loadData(data):
     '''
     '''
@@ -34,18 +21,11 @@ def loadData(data):
     data = np.load(data)
     forest_px = data['forest_px']
     nonforest_px = data['nonforest_px']
-    forest_px_date = data['forest_px_date']
-    nonforest_px_date = data['nonforest_px_date']
-    
-    pdb.set_trace() 
-    forest_px = np.hstack((forest_px, getDatePredictors(forest_px_date)))
-    nonforest_px = np.hstack((nonforest_px, getDatePredictors(nonforest_px_date)))
-
     
     return forest_px, nonforest_px
 
 
-def fitModel(forest_px, nonforest_px, forest_px_date, nonforest_px_date, image_type, regularisation_strength = 1., regularisation_type = 'l1', output_QA = True, output_dir = _getCfgDir()):
+def fitModel(forest_px, nonforest_px, image_type, regularisation_strength = 1., regularisation_type = 'l1', output_QA = True, output_dir = _getCfgDir()):
     '''
     '''
     
@@ -53,6 +33,10 @@ def fitModel(forest_px, nonforest_px, forest_px_date, nonforest_px_date, image_t
     
     # Balance data by undersampling the larger class
     forest_px, nonforest_px = undersampleArray(forest_px, nonforest_px)
+    
+    # Make sample size managable
+    #forest_px = forest_px[::10]
+    #nonforest_px = nonforest_px[::10]
     
     # Prepare data for sklearn
     y = np.array(([1] * forest_px.shape[0]) + ([0] * nonforest_px.shape[0]))
@@ -245,7 +229,7 @@ def main(data, output_dir = _getCfgDir(), regularisation_strength = 1., regulari
     forest_px, nonforest_px = loadData(data)
     
     # Fit a logistic model
-    lr, sc = fitModel(forest_px, nonforest_px, forest_px_date, nonforest_px_date, image_type, regularisation_strength = regularisation_strength, regularisation_type = regularisation_type, output_QA = True, output_dir = output_dir)
+    lr, sc = fitModel(forest_px, nonforest_px, image_type, regularisation_strength = regularisation_strength, regularisation_type = regularisation_type, output_QA = True, output_dir = output_dir)
     
     # Save model coefficients
     saveCoefficients(lr, sc, image_type, output_dir = output_dir)
