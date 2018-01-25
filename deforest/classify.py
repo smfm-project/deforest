@@ -62,7 +62,7 @@ def loadS2(L2A_file, res):
     swir2 = np.ma.array(glymur.Jp2k(swir2_path[0])[:] / 10000., mask = mask)
    
     # Calculate vegetation indices from Shultz 2016
-    indices = np.ma.zeros((mask.shape[0], mask.shape[1], 7), dtype = np.float32)
+    indices = np.ma.zeros((mask.shape[0], mask.shape[1], 9), dtype = np.float32)
     
     # NDVI
     indices[:,:,0] = (nir - red) / (nir + red)
@@ -85,7 +85,17 @@ def loadS2(L2A_file, res):
 
     # TC greenness
     indices[:,:,6] = -0.1603 * blue - 0.2819 * green - 0.4934 * red + 0.7940 * nir - 0.0002 * swir1 - 0.1446 * swir2
-
+    
+    # Load date layers
+    extent, EPSG, datetime, tile = getS2Metadata(L2A_file, resolution = res)
+    
+    # Calculate day of year 
+    doy = (datetime.date() - dt.date(datetime.year,1,1)).days
+    
+    # Two seasonal predictors (trigonometric)
+    indices[:,:,7] = np.sin(2 * np.pi * (doy / 365.))
+    indices[:,:,8] = np.cos(2 * np.pi * (doy / 365.))
+    
     # Set masked data to 0
     indices.data[indices.mask] = 0.
     
@@ -93,7 +103,7 @@ def loadS2(L2A_file, res):
 
 
 
-def loadS1Single(dim_file, polarisation = 'VV'):
+def loadS1Single(dim_file, polarisation = 'VV', return_date = True):
     """
     Extract backscatter data given .dim file and polarisation
     
@@ -118,6 +128,21 @@ def loadS1Single(dim_file, polarisation = 'VV'):
     # Convert from natural units to dB
     data[mask] = 1E-10 # -100 dB, prevents error messages in np.log10
     data = 10 * np.log10(data)
+    
+    # Add day of year
+    if return_date == True:
+        data = np.dstack((data, np.zeros_like(data), np.zeros_like(data)))
+    
+        extent, EPSG, res, datetime, overpass = getS1Metadata(dim_file)
+    
+        # Calculate day of year 
+        doy = (datetime.date() - dt.date(datetime.year,1,1)).days
+        
+        data[:,:,1] = np.sin(2 * np.pi * (doy / 365.))
+        data[:,:,2] = np.cos(2 * np.pi * (doy / 365.))
+        
+        mask = np.dstack((mask, mask, mask))
+                     
     data[mask] = 0
     
     return np.ma.array(data, mask = mask)
@@ -136,13 +161,21 @@ def loadS1Dual(dim_file):
     
     assert getImageType(dim_file) == 'S1dual', "input file %s does not appear to be a dual polarised Sentinel-1 file"%dim_file
         
-    VV = loadS1Single(dim_file, polarisation = 'VV')
+    VV = loadS1Single(dim_file, polarisation = 'VV', return_date = False)
     
-    VH = loadS1Single(dim_file, polarisation = 'VH')
+    VH = loadS1Single(dim_file, polarisation = 'VH', return_date = False)
     
     VV_VH = VV / VH
     
-    return np.ma.dstack((VV, VH, VV_VH))
+    extent, EPSG, res, datetime, overpass = getS1Metadata(dim_file)
+    
+    # Calculate day of year 
+    doy = (datetime.date() - dt.date(datetime.year,1,1)).days
+    
+    doy_X = np.zeros_like(VV) + np.sin(2 * np.pi * (doy / 365.))
+    doy_Y = np.zeros_like(VV) + np.cos(2 * np.pi * (doy / 365.))
+    
+    return np.ma.dstack((VV, VH, VV_VH, doy_X, doy_Y))
 
     
 
