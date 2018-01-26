@@ -99,8 +99,8 @@ def calculateDeforestation(infiles):
     YSize = ds.RasterYSize
     XSize = ds.RasterXSize
     
-    YSize = 2000
-    XSize = 2000
+    #YSize = 2000
+    #XSize = 2000
     
     deforestation = np.zeros((YSize, XSize), dtype=np.bool)
     warning = np.zeros_like(deforestation, dtype=np.bool)
@@ -129,7 +129,7 @@ def calculateDeforestation(infiles):
             for infile in infiles[np.logical_and(dates == date, image_type == this_image_type)]:
                     
                 print 'Loading %s'%infile
-                data = gdal.Open(infile,0).ReadAsArray()[3000:5000,1000:3000]
+                data = gdal.Open(infile,0).ReadAsArray()#[3000:5000,1000:3000]
                 
                 # Select areas that still have the nodata value
                 s = p_forest[:,:,n] == 255
@@ -192,6 +192,7 @@ def calculateDeforestation(infiles):
         #previous_flag[mask == False]  = flag[mask == False]
         #PNF_last[mask == False] = PNF[mask == False]
         #pdb.set_trace() 
+        """
         # Quick and dirty animation
         fig = plt.figure(figsize=(10,5))
         ax1 = plt.subplot2grid((1, 2), (0, 0), rowspan=1, colspan=1)
@@ -207,13 +208,15 @@ def calculateDeforestation(infiles):
         plt.tight_layout()
         plt.savefig('/exports/csce/eddie/geos/groups/SMFM/anim/%s'%infile.split('/')[-1].split('_')[-2]+'_anim.png',dpi=100)
         plt.close()
- 
+        """
     
-    confirmed_deforestation = deforestation_date.astype('datetime64[Y]').astype(int) + 1970
-    confirmed_deforestation[deforestation == False] = 0
-    confirmed_deforestation[confirmed_deforestation == 1970] = 0
+    change_day = (deforestation_date - deforestation_date.astype('datetime64[Y]')).astype(np.float32)
+    
+    confirmed_deforestation = deforestation_date.astype('datetime64[Y]').astype(np.float32) + 1970. + (change_day/365.)
+    confirmed_deforestation[deforestation == False] = 0.
+    confirmed_deforestation[confirmed_deforestation == 1970] = 0.
 
-    warning_deforestation = deforestation_date.astype('datetime64[Y]').astype(int) + 1970
+    warning_deforestation = pchange
     warning_deforestation[deforestation == True] = 0
     warning_deforestation[pchange<0.5] = 0
     warning_deforestation[warning_deforestation == 1970] = 0
@@ -227,7 +230,7 @@ def outputImage(array, image_like, filename):
     
     data_ds = gdal.Open(image_like)
     gdal_driver = gdal.GetDriverByName('GTiff')
-    ds = gdal_driver.Create(filename, data_ds.RasterXSize, data_ds.RasterYSize, 1, 3, options = ['COMPRESS=LZW'])
+    ds = gdal_driver.Create(filename, data_ds.RasterXSize, data_ds.RasterYSize, 1, 6, options = ['COMPRESS=LZW'])
     ds.SetGeoTransform(data_ds.GetGeoTransform())
     ds.SetProjection(data_ds.GetProjection())
     ds.GetRasterBand(1).WriteArray(array)

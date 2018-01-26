@@ -115,10 +115,11 @@ def loadS1Single(dim_file, polarisation = 'VV', return_date = True):
         A maked numpy array of backscatter.
     """
     
+    
     # Remove trailing slash from input filename, if it exists, and determine path of data file
     dim_file = dim_file.rstrip('/')
     data_file = dim_file[:-4] + '.data'
-    
+     
     # Load data
     data = gdal.Open('%s/Gamma0_%s.img'%(data_file,polarisation)).ReadAsArray()
         
@@ -165,7 +166,7 @@ def loadS1Dual(dim_file):
     
     VH = loadS1Single(dim_file, polarisation = 'VH', return_date = False)
     
-    VV_VH = VV / VH
+    VV_VH = VH - VV # Proportional difference, logarithmic
     
     extent, EPSG, res, datetime, overpass = getS1Metadata(dim_file)
     
@@ -714,17 +715,17 @@ def classify(data, image_type, nodata = 255):
     
     coefs, means, scales = loadCoefficients(getImageType(infile))
     
-    if getImageType(infile) == 'S1single':
-        # TODO: Update me
-        p_forest = (0.644 * data) + 1.182
-        
-    elif getImageType(infile) == 'S1dual':
-        # TODO: Update me
-        p_forest = (0.316 * data[:,:,0]) + (0.462 * data[:,:,1]) + 1.205
-    
-    elif getImageType(infile) == 'S2':
-        
-        p_forest = np.sum(coefs[1:] * rescaleData(data, means, scales), axis = 2) + coefs[0]
+    #if getImageType(infile) == 'S1single':
+    #    # TODO: Update me
+    #    p_forest = (0.644 * data) + 1.182
+    #    
+    #elif getImageType(infile) == 'S1dual':
+    #    # TODO: Update me
+    #    p_forest = (0.316 * data[:,:,0]) + (0.462 * data[:,:,1]) + 1.205
+    #
+    #elif getImageType(infile) == 'S2':
+    #    
+    p_forest = np.sum(coefs[1:] * rescaleData(data, means, scales), axis = 2) + coefs[0]
     
     # Convert from odds to probability
     p_forest = np.exp(p_forest) / (1 + np.exp(p_forest))
@@ -764,15 +765,18 @@ def loadData(infile, S2_res = 20, output_dir = os.getcwd(), output_name = 'CLASS
     md_source = buildMetadataDictionary(extent_source, res_source, EPSG_source)
     
     # Load data using appropriate function
-    if getImageType(infile) == 'S1single':    
+    if getImageType(infile) == 'S1single':
+        print 'Doing S1single...'
         data = loadS1Single(infile)
         output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), overpass, datetime.strftime("%Y%m%d_%H%M%S"))
     
     elif getImageType(infile) == 'S1dual':
+        print 'Doing S1dual...'
         data = loadS1Dual(infile)
         output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), overpass, datetime.strftime("%Y%m%d_%H%M%S"))
     
     elif getImageType(infile) == 'S2':
+        print 'Doing S2...'
         data = loadS2(infile, res_source)
         output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), tile, datetime.strftime("%Y%m%d_%H%M%S"))
 
