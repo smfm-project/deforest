@@ -236,17 +236,44 @@ def main(infiles, shp, image_type, normalisation_type = 'global', normalisation_
         forest_mask = rasterizeShapefile(shp, 'forest', md_source)
         nonforest_mask = rasterizeShapefile(shp, 'nonforest', md_source)
         
+        ### Landcover mask test
+        # Get forest and nonforest pixels from landcover map
+        #landcover = classify.loadLandcover('/home/sbowers3/SMFM/DATA/landcover/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif', md_source)
+        #pdb.set_trace()
+        # These are the values that represent forest. In the test map, it's only 1.
+        #forest_key = np.array([1])
+        #forest_mask = np.in1d(landcover, forest_key).reshape(landcover.shape)
+        #nonforest_key = np.array([2, 3, 4, 7]) # Those landcovers to which forest could feasible change into
+        #nonforest_mask = np.in1d(landcover, nonforest_key).reshape(landcover.shape)
+        
+        # Get nonforest pixels within 5 pixels of a forest. TODO: specify minimum extent of forest
+        #from scipy import ndimage
+        #nonforest_mask = np.logical_and(nonforest_mask,ndimage.morphology.binary_dilation(forest_mask.astype(np.int), iterations = 5))
+        ####
+        #pdb.set_trace() 
         # Hack date out of output_filename. TODO: Return date from loadData?
-        date = output_filename.split('/')[-1].split('.')[0].split('_')[-2]
-        date = dt.datetime.strptime(date, '%Y%m%d').date()
-
+        #date = output_filename.split('/')[-1].split('.')[0].split('_')[-2]
+        #date = dt.datetime.strptime(date, '%Y%m%d').date()
+        
         # Extract data for forest training pixels
-        s = np.logical_and(forest_mask==1, np.sum(data_deseasonalised.mask,axis=2)==0)
-        forest_px.extend(data_deseasonalised[s].data.tolist())
+        sub = np.logical_and(forest_mask==1, np.sum(data_deseasonalised.mask,axis=2)==0)
+        data_subset = data_deseasonalised[sub].data
+        sub = np.zeros(data_subset.shape[0], dtype = np.bool)
+        sub[:5000] = True
+        np.random.shuffle(sub)
+        
+        forest_px.extend(data_subset[sub,:].tolist())
+        #forest_px.extend(data_deseasonalised[s].data.tolist())
         
         # Extract data for nonforest training pixels
-        s = np.logical_and(nonforest_mask==1, np.sum(data_deseasonalised.mask,axis=2)==0)
-        nonforest_px.extend(data_deseasonalised[s].data.tolist())
+        sub = np.logical_and(nonforest_mask==1, np.sum(data_deseasonalised.mask,axis=2)==0)
+        data_subset = data_deseasonalised[sub].data
+        sub = np.zeros(data_subset.shape[0], dtype = np.bool)
+        sub[:5000] = True
+        np.random.shuffle(sub)
+        
+        nonforest_px.extend(data_subset[sub,:].tolist())
+        #nonforest_px.extend(data_deseasonalised[s[:5000]].data.tolist())
         
         # Output data (as we go)
         outputData(forest_px, nonforest_px, image_type, output_dir = output_dir)

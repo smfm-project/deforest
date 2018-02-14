@@ -62,7 +62,7 @@ def loadS2(L2A_file, res):
     swir2 = np.ma.array(glymur.Jp2k(swir2_path[0])[:] / 10000., mask = mask)
    
     # Calculate vegetation indices from Shultz 2016
-    indices = np.ma.zeros((mask.shape[0], mask.shape[1], 9), dtype = np.float32)
+    indices = np.ma.zeros((mask.shape[0], mask.shape[1], 7), dtype = np.float32)
     
     # NDVI
     indices[:,:,0] = (nir - red) / (nir + red)
@@ -90,11 +90,11 @@ def loadS2(L2A_file, res):
     extent, EPSG, datetime, tile = getS2Metadata(L2A_file, resolution = res)
     
     # Calculate day of year 
-    doy = (datetime.date() - dt.date(datetime.year,1,1)).days
+    #doy = (datetime.date() - dt.date(datetime.year,1,1)).days
     
     # Two seasonal predictors (trigonometric)
-    indices[:,:,7] = np.ma.array(indices[:,:,7] + np.sin(2 * np.pi * (doy / 365.)), mask = mask)
-    indices[:,:,8] = np.ma.array(indices[:,:,8] + np.cos(2 * np.pi * (doy / 365.)), mask = mask)
+    #indices[:,:,7] = np.ma.array(indices[:,:,7] + np.sin(2 * np.pi * (doy / 365.)), mask = mask)
+    #indices[:,:,8] = np.ma.array(indices[:,:,8] + np.cos(2 * np.pi * (doy / 365.)), mask = mask)
     
     # Set masked data to 0
     indices.data[indices.mask] = 0.
@@ -171,12 +171,12 @@ def loadS1Dual(dim_file):
     extent, EPSG, res, datetime, overpass = getS1Metadata(dim_file)
     
     # Calculate day of year 
-    doy = (datetime.date() - dt.date(datetime.year,1,1)).days
+    #doy = (datetime.date() - dt.date(datetime.year,1,1)).days
     
-    doy_X = np.ma.array(np.zeros_like(VV) + np.sin(2 * np.pi * (doy / 365.)), mask = VV.mask)
-    doy_Y = np.ma.array(np.zeros_like(VV) + np.cos(2 * np.pi * (doy / 365.)), mask = VV.mask)
+    #doy_X = np.ma.array(np.zeros_like(VV) + np.sin(2 * np.pi * (doy / 365.)), mask = VV.mask)
+    #doy_Y = np.ma.array(np.zeros_like(VV) + np.cos(2 * np.pi * (doy / 365.)), mask = VV.mask)
     
-    return np.ma.dstack((VV, VH, VV_VH, doy_X, doy_Y))
+    return np.ma.dstack((VV, VH, VV_VH))#, doy_X, doy_Y))
 
     
 
@@ -392,6 +392,9 @@ def getImageType(infile):
         A string indicating the file type. This can be 'S2' (Sentinel-2), 'S1single' (Sentinel-1, VV polarised), or 'S1dual' (Sentinel-1, VV/VH polarised).
     '''
     
+    # Get rid of trailing / if present
+    infile = infile.rstrip('/')
+    
     if infile.split('/')[-3].split('.')[-1] == 'SAFE':
         
         image_type = 'S2'
@@ -432,7 +435,7 @@ def getFilesInTile(source_files, md_dest):
     '''
       
     do_file = []
-     
+    
     for infile in source_files:
         
         if getImageType(infile) == 'S2':
@@ -575,6 +578,49 @@ def subset(data, md_source, md_dest, dtype = 3):
     
     return np.ma.array(data_resampled, mask = mask_resampled)
 
+
+
+def loadLandcover(landcover_map, md_dest):
+    '''
+    Load a landcover map, and reproject it to the CRS defined in md.
+    For test purposes only.
+    '''
+    
+    from osgeo import osr
+    
+    # Load landcover map
+    ds_source = gdal.Open(landcover_map,0)
+    geo_t = ds_source.GetGeoTransform()
+    proj = ds_source.GetProjection()
+
+    # Get extent and resolution    
+    nrows = ds_source.RasterXSize
+    ncols = ds_source.RasterYSize
+    ulx = float(geo_t[4])
+    uly = float(geo_t[5])
+    xres = float(geo_t[0])
+    yres = float(geo_t[3])
+    lrx = ulx + (xres * ncols)
+    lry = uly + (yres * nrows)
+    extent = [ulx, lry, lrx, uly]
+    
+    # Get EPSG
+    srs = osr.SpatialReference(wkt = proj)
+    srs.AutoIdentifyEPSG()
+    EPSG = int(srs.GetAttrValue("AUTHORITY", 1))
+   
+    # Add source metadata to a dictionary
+    md_source = buildMetadataDictionary(extent, xres, EPSG)
+    
+    # Build an empty destination dataset
+    ds_dest = _createGdalDataset(md_dest,dtype = 1)
+    
+    # And reproject landcover dataset to match input image
+    landcover =_reprojectImage(ds_source, ds_dest, md_source, md_dest, nodatavalue = 0)
+    
+    return np.squeeze(landcover)
+    
+    
                 
 
 def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentile = 95, area = 200000.):
@@ -593,7 +639,7 @@ def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentil
     
     '''
     
-    assert normalisation_type in ['none','local','global'], "normalisation_type must be one of 'none', 'local' or 'global'. It was set to %s."%str(normalisation_type)  
+    assert normalisation_type in ['none','local','global','global2'], "normalisation_type must be one of 'none', 'local', 'global' or 'global2' (test only). It was set to %s."%str(normalisation_type)  
     
         
     # Takes care of case where only a 2d array is input, allowing us to loop through the third axis
@@ -624,7 +670,12 @@ def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentil
             
             # Replace the mask
             data_percentile[:,:,feature] = np.ma.array(data_percentile[:,:,feature], mask = data.mask[:,:,feature])
-        
+            
+            # Try division:
+            #data[:,:,feature] = data[:,:,feature]/data_percentile[:,:,feature]
+        # Try division
+        #data_percentile = np.zeros_like(data)
+         
     # Following Reiche et al. 2018
     if normalisation_type == 'global':
         
@@ -638,6 +689,29 @@ def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentil
             else:
                 # This catches the case where there's no usable data in an image
                 data_percentile[:,:,feature] = 0
+    
+    # Following Reiche et al. 2018 (with forest benchmark map)
+    if normalisation_type == 'global2':
+        
+        data_percentile = np.zeros_like(data)
+        
+        # Load landcover map
+        landcover = loadLandcover('/home/sbowers3/SMFM/DATA/landcover/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif', md)
+        
+        # These are the values that represent forest. In the test map, it's only 1.
+        forest_key = np.array([1])
+        forest_px = np.in1d(landcover, forest_key).reshape(landcover.shape)
+        
+        
+        for feature in range(data.shape[2]):
+
+            if (data.mask==False).sum() != 0:
+                # np.percentile doesn't understand masked arrays, so calculate percentile one feature at a time
+                data_percentile[:,:,feature] = np.percentile(data.data[:,:,feature][np.logical_and(data.mask[:,:,feature]==False, forest_px)], normalisation_percentile)
+            else:
+                # This catches the case where there's no usable data in an image
+                data_percentile[:,:,feature] = 0
+
     
     # Get rid of residual dimensions where 2d array was input
     data = np.squeeze(data)
@@ -767,7 +841,7 @@ def loadData(infile, S2_res = 20, output_dir = os.getcwd(), output_name = 'CLASS
     # Load data using appropriate function
     if getImageType(infile) == 'S1single':
         print 'Doing S1single...'
-        data = loadS1Single(infile)
+        data = loadS1Single(infile, return_date = False)
         output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), overpass, datetime.strftime("%Y%m%d_%H%M%S"))
     
     elif getImageType(infile) == 'S1dual':

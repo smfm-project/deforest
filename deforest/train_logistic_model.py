@@ -35,23 +35,21 @@ def fitModel(forest_px, nonforest_px, image_type, regularisation_strength = 1., 
     forest_px, nonforest_px = undersampleArray(forest_px, nonforest_px)
     
     # Make sample size managable
-    forest_px = forest_px[::10]
-    nonforest_px = nonforest_px[::10]
+    forest_px = forest_px#[::10]
+    nonforest_px = nonforest_px#[::10]
     
     # Prepare data for sklearn
     y = np.array(([1] * forest_px.shape[0]) + ([0] * nonforest_px.shape[0]))
     X = np.vstack((forest_px,nonforest_px))
     
-    X[:,2] = X[:,1] - X[:,0]
     pdb.set_trace()
-    
     #X = np.hstack((X[:,:3],interactions1,interactions2))
 
     
     # Polynomial expansion method (optional). May in some cases improve results, if strong regularisation used.
-    from sklearn.preprocessing import PolynomialFeatures
-    poly = PolynomialFeatures(3)
-    X = poly.fit_transform(X)
+    #from sklearn.preprocessing import PolynomialFeatures
+    #poly = PolynomialFeatures(3)
+    #X = poly.fit_transform(X)
     
     # Split into training and test datasets
     from sklearn.cross_validation import train_test_split
@@ -79,9 +77,9 @@ def fitModel(forest_px, nonforest_px, image_type, regularisation_strength = 1., 
     #print clf.best_params_
     
     # Post-hoc probability calibration. Essential where not using Logistic Regression.
-    from sklearn.calibration import CalibratedClassifierCV
-    lr = CalibratedClassifierCV(lr, method="sigmoid", cv="prefit")
-    lr.fit(X_valid_std, y_valid)
+    #from sklearn.calibration import CalibratedClassifierCV
+    #lr = CalibratedClassifierCV(lr, method="sigmoid", cv="prefit")
+    #lr.fit(X_valid_std, y_valid)
     pdb.set_trace()
     # Quality assessment:
     # We strongly recommend you carefully consider the quality of your models. These are the metrics that worked for us, but it's perfeclty possible they'll work poorly in your case. Proceed with caution! 
