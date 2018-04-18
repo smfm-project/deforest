@@ -610,7 +610,7 @@ def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentil
     data_percentile = np.squeeze(data_percentile)
         
     # And subtract the seasonal effect from the array
-    data_deseasonalised = data - data_percentile 
+    data_deseasonalised = data - data_percentile
     
     return data_deseasonalised
 
