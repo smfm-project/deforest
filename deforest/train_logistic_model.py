@@ -42,7 +42,6 @@ def fitModel(forest_px, nonforest_px, image_type, regularisation_strength = 1., 
     y = np.array(([1] * forest_px.shape[0]) + ([0] * nonforest_px.shape[0]))
     X = np.vstack((forest_px,nonforest_px))
     
-    pdb.set_trace()
     #X = np.hstack((X[:,:3],interactions1,interactions2))
 
     
@@ -80,7 +79,6 @@ def fitModel(forest_px, nonforest_px, image_type, regularisation_strength = 1., 
     #from sklearn.calibration import CalibratedClassifierCV
     #lr = CalibratedClassifierCV(lr, method="sigmoid", cv="prefit")
     #lr.fit(X_valid_std, y_valid)
-    pdb.set_trace()
     # Quality assessment:
     # We strongly recommend you carefully consider the quality of your models. These are the metrics that worked for us, but it's perfeclty possible they'll work poorly in your case. Proceed with caution! 
 

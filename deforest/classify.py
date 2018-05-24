@@ -1,10 +1,9 @@
 
 import argparse
 import csv
-import datetime as dt
+import datetime
 import glob
 import glymur
-import lxml.etree as ET
 import matplotlib.pyplot as plt
 import multiprocessing
 import numpy as np
@@ -12,98 +11,16 @@ import os
 from osgeo import gdal
 import scipy.ndimage
 
+import sys
+sys.path.insert(0, '/exports/csce/datastore/geos/users/sbowers3/sen2mosaic')
+
+import sen2mosaic.utilities
+
 import pdb
 
 
-def loadS2(L2A_file, res):
-    """
-    Calculate a range of vegetation indices given .SAFE file and resolution.
-    
-    Args:
-        L2A_file: A granule from a level 2A Sentinel-2 .SAFE file, processed with sen2cor.
-        res: Integer of resolution to be processed (i.e. 20 or 60 m). 
-    
-    Returns:
-        A maked numpy array of NDVI.
-    """
-    
-    # Remove trailing slash from input filename, if it exists
-    L2A_file = L2A_file.rstrip('/')
-    
-    # Identify the cloud mask following the standardised file pattern
-    mask_path = glob.glob('%s/IMG_DATA/R%sm/*_SCL_*m.jp2'%(L2A_file,str(res)))
-    
-    # In case of old file format structure, the SCL file is stored elsewhere
-    if len(mask_path) == 0:
-        mask_path = glob.glob('%s/IMG_DATA/*_SCL_*%sm.jp2'%(L2A_file,str(res)))
-            
-    # Load the cloud mask as a numpy array
-    jp2 = glymur.Jp2k(mask_path[0])
-    mask = jp2[:]
-    
-    # Convert mask to a boolean array, allowing only values of 4 (vegetation), 5 (bare sois), and 6 (water)
-    mask = np.logical_or(mask < 4, mask > 6)  
-       
-    
-    # Identify the red/NIR bands following the standardised file pattern
-    blue_path = glob.glob('%s/IMG_DATA/R%sm/*_B02_*m.jp2'%(L2A_file,str(res)))
-    green_path = glob.glob('%s/IMG_DATA/R%sm/*_B03_*m.jp2'%(L2A_file,str(res)))
-    red_path = glob.glob('%s/IMG_DATA/R%sm/*_B04_*m.jp2'%(L2A_file,str(res)))
-    nir_path = glob.glob('%s/IMG_DATA/R%sm/*_B8A_*m.jp2'%(L2A_file,str(res)))
-    swir1_path = glob.glob('%s/IMG_DATA/R%sm/*_B11_*m.jp2'%(L2A_file,str(res)))
-    swir2_path = glob.glob('%s/IMG_DATA/R%sm/*_B12_*m.jp2'%(L2A_file,str(res)))
 
-    # Load the data (as numpy array)
-    blue = np.ma.array(glymur.Jp2k(blue_path[0])[:] / 10000., mask = mask)
-    green = np.ma.array(glymur.Jp2k(green_path[0])[:] / 10000., mask = mask)
-    red = np.ma.array(glymur.Jp2k(red_path[0])[:] / 10000., mask = mask)
-    nir = np.ma.array(glymur.Jp2k(nir_path[0])[:] / 10000., mask = mask)
-    swir1 = np.ma.array(glymur.Jp2k(swir1_path[0])[:] / 10000., mask = mask)
-    swir2 = np.ma.array(glymur.Jp2k(swir2_path[0])[:] / 10000., mask = mask)
-   
-    # Calculate vegetation indices from Shultz 2016
-    indices = np.ma.zeros((mask.shape[0], mask.shape[1], 7), dtype = np.float32)
-    
-    # NDVI
-    indices[:,:,0] = (nir - red) / (nir + red)
-    
-    # EVI
-    indices[:,:,1] = ((nir - red) / (nir + 6 * red - 7.5 * blue + 1)) * 2.5
-    
-    # GEMI
-    n = (2 * (nir ** 2 - red ** 2) + 1.5 * nir + 0.5 * red) / nir + red + 0.5
-    indices[:,:,2] = (n * (1 - 0.25 * n)) - ((red - 0.125) / (1 - red))
-    
-    # NDMI
-    indices[:,:,3] = (nir - swir1) / (nir + swir1)
-    
-    # SAVI
-    indices[:,:,4] = (1 + 0.5) * ((nir - red) / (nir + red + 0.5))
-    
-    # TC wetness
-    indices[:,:,5] = 0.0315 * blue + 0.2021 * green + 0.3102 * red + 0.1594 * nir - 0.6806 * swir1 - 0.6109 * swir2
-
-    # TC greenness
-    indices[:,:,6] = -0.1603 * blue - 0.2819 * green - 0.4934 * red + 0.7940 * nir - 0.0002 * swir1 - 0.1446 * swir2
-    
-    # Load date layers
-    extent, EPSG, datetime, tile = getS2Metadata(L2A_file, resolution = res)
-    
-    # Calculate day of year 
-    #doy = (datetime.date() - dt.date(datetime.year,1,1)).days
-    
-    # Two seasonal predictors (trigonometric)
-    #indices[:,:,7] = np.ma.array(indices[:,:,7] + np.sin(2 * np.pi * (doy / 365.)), mask = mask)
-    #indices[:,:,8] = np.ma.array(indices[:,:,8] + np.cos(2 * np.pi * (doy / 365.)), mask = mask)
-    
-    # Set masked data to 0
-    indices.data[indices.mask] = 0.
-    
-    return indices
-
-
-
-def loadS1Single(dim_file, polarisation = 'VV', return_date = True):
+def loadS1Single(scene, polarisation = 'VV', normalise = True):
     """
     Extract backscatter data given .dim file and polarisation
     
@@ -117,39 +34,22 @@ def loadS1Single(dim_file, polarisation = 'VV', return_date = True):
     
     
     # Remove trailing slash from input filename, if it exists, and determine path of data file
-    dim_file = dim_file.rstrip('/')
-    data_file = dim_file[:-4] + '.data'
+    data_file = scene.filename[:-4] + '.data'
      
     # Load data
     data = gdal.Open('%s/Gamma0_%s.img'%(data_file,polarisation)).ReadAsArray()
         
     # Get mask (where backscatter is 0)
-    mask = data == 0
+    data = np.ma.array(data, mask = data == 0)
     
-    # Convert from natural units to dB
-    data[mask] = 1E-10 # -100 dB, prevents error messages in np.log10
-    data = 10 * np.log10(data)
+    # Normalise
+    if normalise:
+        data = normalise(data, scene.metadata, normalisation_type = scene.normalisation_type, normalisation_percentile = scene.normalisation_percentile, normalisation_area = scene.normalisation_area)
     
-    # Add day of year
-    if return_date == True:
-        data = np.dstack((data, np.zeros_like(data), np.zeros_like(data)))
-    
-        extent, EPSG, res, datetime, overpass = getS1Metadata(dim_file)
-    
-        # Calculate day of year 
-        doy = (datetime.date() - dt.date(datetime.year,1,1)).days
-        
-        data[:,:,1] = np.sin(2 * np.pi * (doy / 365.))
-        data[:,:,2] = np.cos(2 * np.pi * (doy / 365.))
-        
-        mask = np.dstack((mask, mask, mask))
-                     
-    data[mask] = 0
-    
-    return np.ma.array(data, mask = mask)
+    return data
 
 
-def loadS1Dual(dim_file):
+def loadS1Dual(scene):
     """
     Extract backscatter metrics from a dual-polarised Sentinel-1 image.
     
@@ -160,320 +60,87 @@ def loadS1Dual(dim_file):
         A maked numpy array of VV, VH and VV/VH backscatter.
     """
     
-    assert getImageType(dim_file) == 'S1dual', "input file %s does not appear to be a dual polarised Sentinel-1 file"%dim_file
+    assert scene.image_type == 'S1dual', "input file %s does not appear to be a dual polarised Sentinel-1 file"%dim_file
         
-    VV = loadS1Single(dim_file, polarisation = 'VV', return_date = False)
+    VV = loadS1Single(scene.filename, polarisation = 'VV', normalise = False)
     
-    VH = loadS1Single(dim_file, polarisation = 'VH', return_date = False)
+    VH = loadS1Single(scene.filename, polarisation = 'VH', normalise = False)
     
     VV_VH = VH - VV # Proportional difference, logarithmic
     
-    extent, EPSG, res, datetime, overpass = getS1Metadata(dim_file)
+    data = np.ma.vstack((VV, VH, VV_VH))
     
-    # Calculate day of year 
-    #doy = (datetime.date() - dt.date(datetime.year,1,1)).days
+    data = normalise(data, scene.metadata, normalisation_type = scene.normalisation_type, normalisation_percentile = scene.normalisation_percentile, normalisation_area = scene.normalisation_area)
     
-    #doy_X = np.ma.array(np.zeros_like(VV) + np.sin(2 * np.pi * (doy / 365.)), mask = VV.mask)
-    #doy_Y = np.ma.array(np.zeros_like(VV) + np.cos(2 * np.pi * (doy / 365.)), mask = VV.mask)
-    
-    return np.ma.dstack((VV, VH, VV_VH))#, doy_X, doy_Y))
+    return data
 
-    
 
-def getS1Metadata(dim_file):
-    '''
-    Function to extract georefence info from level 2A Sentinel 2 data in .SAFE format.
+
+
+
+def loadS2(scene, normalisation_type = 'none', normalisation_percentile = 95, normalisation_area = 200000, reference_scene = None):
+    """
+    Calculate a range of vegetation indices given .SAFE file and resolution.
     
     Args:
-        dim_file: 
-        polarisation: Defaults to 'VV'.
-
+        scene: 
+    
     Returns:
-        A list describing the extent of the .dim file, in the format [xmin, ymin, xmax, ymax].
-        EPSG code of the coordinate reference system of the image
-        The image resolution
-    '''
+        A maked numpy array of vegetation indices.
+    """
+       
+    mask = scene.getMask(correct = True)
     
-    from osgeo import gdal, osr
+    # Convert mask to a boolean array, allowing only values of 4 (vegetation), 5 (bare sois), and 6 (water)
+    mask = np.logical_or(mask < 4, mask > 6)
     
-    assert os.path.exists(dim_file), "The location %s does not contain a Sentinel-1 .dim file."%dim_file
+    # Load the data (as masked numpy array)
+    blue = scene.getBand('B02')[mask == False] / 10000.
+    green = scene.getBand('B03')[mask == False] / 10000.
+    red = scene.getBand('B04')[mask == False] / 10000.
+    swir1 = scene.getBand('B11')[mask == False] / 10000.
+    swir2 = scene.getBand('B12')[mask == False] / 10000.
     
-    tree = ET.ElementTree(file = dim_file)
-    root = tree.getroot()
-    
-    # Get array size
-    size = root.find("Raster_Dimensions")  
-    nrows = int(size.find('NROWS').text)
-    ncols = int(size.find('NCOLS').text)
-    
-    geopos = root.find("Geoposition/IMAGE_TO_MODEL_TRANSFORM").text.split(',')
-    ulx = float(geopos[4])
-    uly = float(geopos[5])
-    xres = float(geopos[0])
-    yres = float(geopos[3])
-    lrx = ulx + (xres * ncols)
-    lry = uly + (yres * nrows)
-    extent = [ulx, lry, lrx, uly]
-    
-    res = abs(xres)
-        
-    wkt = root.find("Coordinate_Reference_System/WKT").text
-    
-    srs = osr.SpatialReference(wkt = wkt)
-    srs.AutoIdentifyEPSG()
-    EPSG = int(srs.GetAttrValue("AUTHORITY", 1))
-    
-    # Extract date string from filename
-    datestring = root.find("Production/PRODUCT_SCENE_RASTER_START_TIME").text.split('.')[0]
-    datetime = dt.datetime.strptime(datestring, '%d-%b-%Y %H:%M:%S')
-    
-    # Get ascending/descending overpass
-    overpass = root.find("Dataset_Sources/MDElem/MDElem/MDATTR[@name='PASS']").text
-    
-    return extent, EPSG, res, datetime, overpass
-
-
-
-def getS2Metadata(granule_file, resolution = 20):
-    '''
-    Function to extract georefence info from level 2A Sentinel 2 data in .SAFE format.
-    
-    Args:
-        granule_file: String with /path/to/the/granule folder bundled in a .SAFE file.
-        resolution: Integer describing pixel size in m (10, 20, or 60). Defaults to 20 m.
-
-    Returns:
-        A list describing the extent of the .SAFE file granule, in the format [xmin, ymin, xmax, ymax].
-        EPSG code of the coordinate reference system of the granule
-    '''
-
-    import lxml.etree as ET
-    
-    # Remove trailing / from granule directory if present 
-    granule_file = granule_file.rstrip('/')
-    
-    assert len(glob.glob((granule_file + '/*MTD*.xml'))) > 0, "The location %s does not contain a metadata (*MTD*.xml) file."%granule_file
-    
-    # Find the xml file that contains file metadata
-    xml_file = glob.glob(granule_file + '/*MTD*.xml')[0]
-    
-    # Parse xml file
-    tree = ET.ElementTree(file = xml_file)
-    root = tree.getroot()
-            
-    # Define xml namespace (specific to level 2A Sentinel 2 .SAFE files)
-    ns = {'n1':root.tag[1:].split('}')[0]}
-    
-    # Get array size
-    size = root.find("n1:Geometric_Info/Tile_Geocoding[@metadataLevel='Brief']/Size[@resolution='%s']"%str(resolution),ns)
-    nrows = int(size.find('NROWS').text)
-    ncols = int(size.find('NCOLS').text)
-    
-    # Get extent data
-    geopos = root.find("n1:Geometric_Info/Tile_Geocoding[@metadataLevel='Brief']/Geoposition[@resolution='%s']"%str(resolution),ns)
-    ulx = float(geopos.find('ULX').text)
-    uly = float(geopos.find('ULY').text)
-    xres = float(geopos.find('XDIM').text)
-    yres = float(geopos.find('YDIM').text)
-    lrx = ulx + (xres * ncols)
-    lry = uly + (yres * nrows)
-    
-    extent = [ulx, lry, lrx, uly]
-    
-    # Find EPSG code to define projection
-    EPSG = root.find("n1:Geometric_Info/Tile_Geocoding[@metadataLevel='Brief']/HORIZONTAL_CS_CODE",ns).text
-    EPSG = int(EPSG.split(':')[1])
-    
-    # Get datetime
-    datestring = root.find("n1:General_Info/SENSING_TIME[@metadataLevel='Standard']",ns).text.split('.')[0]
-    datetime = dt.datetime.strptime(datestring,'%Y-%m-%dT%H:%M:%S')
-    
-    # Get tile from granule filename
-    if granule_file.split('/')[-1].split('_')[1] == 'USER':
-        
-        # If old file format
-        tile = granule_file.split('/')[-1].split('_')[-2]
-        
+    if scene.resolution == 10:
+        nir = scene.getBand('B08')[mask == False] / 10000.
     else:
+        nir = scene.getBand('B8A')[mask == False] / 10000.
+       
+    # Calculate vegetation indices from Shultz 2016
+    indices = np.zeros((mask.shape[0], mask.shape[1], 5), dtype = np.float32)
+    
+    # Don't report div0 errors
+    with np.errstate(divide='ignore'):
         
-        # If new file format
-        tile = granule_file.split('/')[-1].split('_')[1]
-    
-    return extent, EPSG, datetime, tile
-
-
-
-def buildMetadataDictionary(extent_dest, res, EPSG):
-    '''
-    Build a metadata dictionary to describe the destination georeference info
-    
-    Args:
-        extent_dest: List desciribing corner coordinate points in destination CRS [xmin, ymin, xmax, ymax]
-        res: Integer describing pixel size in m
-        EPSG: EPSG code of destination coordinate reference system. Must be a UTM projection. See: https://www.epsg-registry.org/ for codes.
-    
-    Returns:
-        A dictionary containg projection info.
-    '''
-    
-    from osgeo import osr
-    
-    # Set up an empty dictionary
-    md = {}
-    
-    # Define projection from EPSG code
-    md['EPSG_code'] = EPSG
-
-    # Get GDAL projection string
-    proj = osr.SpatialReference()
-    proj.ImportFromEPSG(EPSG)
-    md['proj'] = proj
-    
-    # Get image extent data
-    md['ulx'] = float(extent_dest[0])
-    md['lry'] = float(extent_dest[1])
-    md['lrx'] = float(extent_dest[2])
-    md['uly'] = float(extent_dest[3])
-    md['xres'] = float(res)
-    md['yres'] = float(-res)
-
-    # Save current resolution for future reference
-    md['res'] = res
-    
-    # Calculate array size
-    md['nrows'] = int(round((md['lry'] - md['uly']) / md['yres']))
-    md['ncols'] = int(round((md['lrx'] - md['ulx']) / md['xres']))
-    
-    # Define gdal geotransform (Affine)
-    md['geo_t'] = (md['ulx'], md['xres'], 0, md['uly'], 0, md['yres'])
-    
-    return md
-
-
-
-def _testOutsideTile(md_source, md_dest):
-    '''
-    Function that uses metadata dictionaries from buildMetadatadisctionary() metadata to test whether any part of a source data falls inside destination tile.
-    
-    Args:
-        md_source: A metadata dictionary created by buildMetadataDictionary() representing the source image.
-        md_dest: A metadata dictionary created by buildMetadataDictionary() representing the destination image.
+        # NDVI
+        indices[:,:,0][mask == False] = (nir - red) / (nir + red)
         
-    Returns:
-        A boolean (True/False) value.
-    '''
-    
-    from osgeo import osr
-            
-    # Set up function to translate coordinates from source to destination
-    tx = osr.CoordinateTransformation(md_source['proj'], md_dest['proj'])
-         
-    # And translate the source coordinates
-    md_source['ulx'], md_source['uly'], z = tx.TransformPoint(md_source['ulx'], md_source['uly'])
-    md_source['lrx'], md_source['lry'], z = tx.TransformPoint(md_source['lrx'], md_source['lry'])   
-    
-    out_of_tile =  md_source['ulx'] >= md_dest['lrx'] or \
-                   md_source['lrx'] <= md_dest['ulx'] or \
-                   md_source['uly'] <= md_dest['lry'] or \
-                   md_source['lry'] >= md_dest['uly']
-    
-    return out_of_tile
-
-
-
-def getImageType(infile):
-    '''
-    Determines the type of image from a filepath.
-    
-    Args:
-        infile: '/path/to/input_file'
-    
-    Returns
-        A string indicating the file type. This can be 'S2' (Sentinel-2), 'S1single' (Sentinel-1, VV polarised), or 'S1dual' (Sentinel-1, VV/VH polarised).
-    '''
-    
-    # Get rid of trailing / if present
-    infile = infile.rstrip('/')
-    
-    if infile.split('/')[-3].split('.')[-1] == 'SAFE':
+        # EVI
+        indices[:,:,1][mask == False] = ((nir - red) / (nir + 6 * red - 7.5 * blue + 1)) * 2.5
         
-        image_type = 'S2'
-    
-    elif infile.split('/')[-1].split('.')[-1] == 'dim':
+        # GEMI
+        n = (2 * (nir ** 2 - red ** 2) + 1.5 * nir + 0.5 * red) / (nir + red + 0.5)
+        indices[:,:,2][mask == False] = (n * (1 - 0.25 * n)) - ((red - 0.125) / (1 - red))
         
-        # Use metadata to determine number of bands
-        tree = ET.ElementTree(file = infile)
-        root = tree.getroot()
-    
-        # Get array size
-        bands = int(root.find("Raster_Dimensions/NBANDS").text)
+        # NDMI
+        indices[:,:,3][mask == False] = (nir - swir1) / (nir + swir1)
         
-        if bands > 1:
-            image_type = 'S1dual'
-        else:
-            image_type = 'S1single'
-     
-    else: 
-        print 'WARNING: File %s does not match any expected file pattern'%infile
-        image_type = None
-    
-    return image_type
-    
-    
-
-
-def getFilesInTile(source_files, md_dest):
-    '''
-    Takes a list of source files as input, and determines where each falls within extent of output tile.
-    
-    Args:
-        source_files: A list of S1/S2 input files.
-        md_dest: Dictionary from buildMetaDataDictionary() containing output projection details.
-
-    Returns:
-        A reduced list of source_files containing only files that will contribute to each tile.
-    '''
-      
-    do_file = []
-    
-    for infile in source_files:
+        # SAVI
+        indices[:,:,4][mask == False] = (1 + 0.5) * ((nir - red) / (nir + red + 0.5))
         
-        if getImageType(infile) == 'S2':
-            
-            # Extract this image's resolution from md_dest
-            if md_dest['res'] < 20:
-                res_source = 10
-            elif md_dest['res'] >= 20 and md_dest['res'] < 60:
-                res_source = 20
-            elif md_dest['res'] >= 60:
-                res_source = 60
-            
-            # Get source file metadata if from Sentinel-2
-            extent_source, EPSG_source, datetime, tile = getS2Metadata(infile, resolution = res_source)
-            
+        # TC wetness
+        #indices[:,:,5][mask == False] = 0.0315 * blue + 0.2021 * green + 0.3102 * red + 0.1594 * nir - 0.6806 * swir1 - 0.6109 * swir2
         
-        elif getImageType(infile) == 'S1single' or getImageType(infile) == 'S1dual':
-                        
-            # Get source file metadata if from Sentinel-1
-            extent_source, EPSG_source, res_source, datetime, overpass = getS1Metadata(infile)
-             
-        # Define source file metadata dictionary
-        md_source = buildMetadataDictionary(extent_source, res_source, EPSG_source)
-
-        # Skip processing the file if image falls outside of tile area
-        if _testOutsideTile(md_source, md_dest):
-            do_file.append(False)
-            continue
+        # TC greenness
+        #indices[:,:,6][mask == False] = -0.1603 * blue - 0.2819 * green - 0.4934 * red + 0.7940 * nir - 0.0002 * swir1 - 0.1446 * swir2
         
-        #print '    Found one: %s'%input_file
-        do_file.append(True)
+        # Turn into a masked array
+        indices = np.ma.array(indices, mask = np.repeat(np.expand_dims(mask,2), indices.shape[-1], axis=2))
+        
+    # Normalise data
+    indices = normalise(indices, scene.metadata, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile, normalisation_area = normalisation_area, reference_scene = reference_scene)
     
-    # Get subset of source_files in specified limits
-    source_files_tile = list(np.array(source_files)[np.array(do_file)])
-        
-    return source_files_tile
-
-
+    return indices
 
 
 
@@ -482,7 +149,7 @@ def _createGdalDataset(md, data_out = None, filename = '', driver = 'MEM', dtype
     Function to create an empty gdal dataset with georefence info from metadata dictionary.
 
     Args:
-        md: A metadata dictionary created by buildMetadataDictionary().
+        md: Object from Metadata() class.
         data_out: Optionally specify an array of data to include in the gdal dataset.
         filename: Optionally specify an output filename, if image will be written to disk.
         driver: GDAL driver type (e.g. 'MEM', 'GTiff'). By default this function creates an array in memory, but set driver = 'GTiff' to make a GeoTiff. If writing a file to disk, the argument filename must be specified.
@@ -493,16 +160,16 @@ def _createGdalDataset(md, data_out = None, filename = '', driver = 'MEM', dtype
         A GDAL dataset.
     '''
     from osgeo import gdal, osr
-       
+        
     gdal_driver = gdal.GetDriverByName(driver)
-    ds = gdal_driver.Create(filename, md['ncols'], md['nrows'], RasterCount, dtype, options = options)
+    ds = gdal_driver.Create(filename, md.ncols, md.nrows, RasterCount, dtype, options = options)
     
-    ds.SetGeoTransform(md['geo_t'])
+    ds.SetGeoTransform(md.geo_t)
     
     proj = osr.SpatialReference()
-    proj.ImportFromEPSG(md['EPSG_code'])
+    proj.ImportFromEPSG(md.EPSG_code)
     ds.SetProjection(proj.ExportToWkt())
-        
+    
     # If a data array specified, add data to the gdal dataset
     if type(data_out).__module__ == np.__name__:
         
@@ -520,112 +187,11 @@ def _createGdalDataset(md, data_out = None, filename = '', driver = 'MEM', dtype
         ds = None
     
     return ds
-
-
-def _reprojectImage(ds_source, ds_dest, md_source, md_dest, nodatavalue = 0):
-    '''
-    Reprojects a source image to match the coordinates of a destination GDAL dataset.
-    
-    Args:
-        ds_source: A gdal dataset from _createGdalDataset() containing data to be repojected.
-        ds_dest: A gdal dataset from _createGdalDataset(), with destination coordinate reference system and extent.
-        md_source: A metadata dictionary created by buildMetadataDictionary() representing the source image.
-        md_dest: A metadata dictionary created by buildMetadataDictionary() representing the destination image.
-        nodatavalue: New array is initalised to nodatavalue (default = 0). Optionally change this to another value. For example, set nodatavalue = 1 for a mask.
-        
-    Returns:
-        A GDAL array with resampled data
-    '''
-    
-    from osgeo import gdal
-    
-    proj_source = md_source['proj'].ExportToWkt()
-    proj_dest = md_dest['proj'].ExportToWkt()
-    
-    # Set nodata value
-    for feature in range(ds_dest.RasterCount):
-        ds_dest.GetRasterBand(feature + 1).Fill(nodatavalue)
-        ds_dest.GetRasterBand(feature + 1).SetNoDataValue(nodatavalue)
-    
-    # Reproject source into dest project coordinates
-    gdal.ReprojectImage(ds_source, ds_dest, proj_source, proj_dest, gdal.GRA_NearestNeighbour)
-    
-    data_resampled = np.zeros((ds_dest.RasterYSize,ds_dest.RasterXSize, ds_dest.RasterCount))
-    
-    for feature in range(ds_dest.RasterCount):
-        data_resampled[:,:,feature] = ds_dest.GetRasterBand(feature + 1).ReadAsArray()
-    
-    return data_resampled
-
-
-def subset(data, md_source, md_dest, dtype = 3):
-    '''
-    '''
-       
-    if len(data.shape) == 2:
-        RasterCount = 1
-    else:
-        RasterCount = data.shape[2]
-        
-    # Write array to a gdal dataset
-    ds_source = _createGdalDataset(md_source, data_out = data.data, dtype = dtype, RasterCount = RasterCount)
-    ds_dest = _createGdalDataset(md_dest, dtype = dtype, RasterCount = RasterCount)
-    data_resampled = _reprojectImage(ds_source, ds_dest, md_source, md_dest)
-    
-    ds_source = _createGdalDataset(md_source, data_out = data.mask, dtype = 1, RasterCount = RasterCount)
-    ds_dest = _createGdalDataset(md_dest, dtype = 1, RasterCount = RasterCount)
-    mask_resampled = _reprojectImage(ds_source, ds_dest, md_source, md_dest, nodatavalue = 1) # No data values should be added to the mask
-    
-    return np.ma.array(data_resampled, mask = mask_resampled)
-
-
-
-def loadLandcover(landcover_map, md_dest):
-    '''
-    Load a landcover map, and reproject it to the CRS defined in md.
-    For test purposes only.
-    '''
-    
-    from osgeo import osr
-    
-    # Load landcover map
-    ds_source = gdal.Open(landcover_map,0)
-    geo_t = ds_source.GetGeoTransform()
-    proj = ds_source.GetProjection()
-
-    # Get extent and resolution    
-    nrows = ds_source.RasterXSize
-    ncols = ds_source.RasterYSize
-    ulx = float(geo_t[4])
-    uly = float(geo_t[5])
-    xres = float(geo_t[0])
-    yres = float(geo_t[3])
-    lrx = ulx + (xres * ncols)
-    lry = uly + (yres * nrows)
-    extent = [ulx, lry, lrx, uly]
-    
-    # Get EPSG
-    srs = osr.SpatialReference(wkt = proj)
-    srs.AutoIdentifyEPSG()
-    EPSG = int(srs.GetAttrValue("AUTHORITY", 1))
-   
-    # Add source metadata to a dictionary
-    md_source = buildMetadataDictionary(extent, xres, EPSG)
-    
-    # Build an empty destination dataset
-    ds_dest = _createGdalDataset(md_dest,dtype = 1)
-    
-    # And reproject landcover dataset to match input image
-    landcover =_reprojectImage(ds_source, ds_dest, md_source, md_dest, nodatavalue = 0)
-    
-    return np.squeeze(landcover)
-    
-    
                 
 
-def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentile = 95, area = 200000.):
+def normalise(data, md, normalisation_type = 'none', normalisation_percentile = 95, normalisation_area = 200000., reference_scene = None):
     '''
-    Deseasonalises an array by dividing pixels by the 95th percentile value in the vicinity of each pixel
+    Normalises an array by dividing pixels by the 95th percentile value in the vicinity of each pixel
     
     Args:
         data: A masked numpy array containing the data
@@ -639,16 +205,17 @@ def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentil
     
     '''
     
-    assert normalisation_type in ['none','local','global','global2'], "normalisation_type must be one of 'none', 'local', 'global' or 'global2' (test only). It was set to %s."%str(normalisation_type)  
+    assert normalisation_type in ['none','local','global','match'], "normalisation_type must be one of 'none', 'local', 'global' or 'match' (test only). It was set to %s."%str(normalisation_type)  
     
+    if normalisation_type == 'match':
+        assert reference_scene is not None, "A matching scene must be specified if using match for image normalisation."
         
     # Takes care of case where only a 2d array is input, allowing us to loop through the third axis
     if data.ndim == 2:
         data = np.ma.expand_dims(data,2)
         
-    # No normalisation
-    if normalisation_type == 'none':
-        data_percentile = np.zeros_like(data)
+    # No normalisation        
+    data_percentile = np.zeros_like(data)
     
     # Following Hamunyela et al. 2016
     if normalisation_type == 'local':
@@ -671,10 +238,6 @@ def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentil
             # Replace the mask
             data_percentile[:,:,feature] = np.ma.array(data_percentile[:,:,feature], mask = data.mask[:,:,feature])
             
-            # Try division:
-            #data[:,:,feature] = data[:,:,feature]/data_percentile[:,:,feature]
-        # Try division
-        #data_percentile = np.zeros_like(data)
          
     # Following Reiche et al. 2018
     if normalisation_type == 'global':
@@ -690,37 +253,47 @@ def deseasonalise(data, md, normalisation_type = 'none', normalisation_percentil
                 # This catches the case where there's no usable data in an image
                 data_percentile[:,:,feature] = 0
     
-    # Following Reiche et al. 2018 (with forest benchmark map)
-    if normalisation_type == 'global2':
+    # Normalise to reference_scene
+    if normalisation_type == 'match':
         
-        data_percentile = np.zeros_like(data)
+        # Histogram matching with overlap
+        #data = sen2mosaic.utilities.histogram_match(data, reference_scene)
         
-        # Load landcover map
-        landcover = loadLandcover('/home/sbowers3/SMFM/DATA/landcover/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif', md)
+        # Gain compensation at overlap
+        """
+        for i in range(data.shape[-1]):
+            pdb.set_trace()
+            overlap = np.logical_and(data.mask[:,:,i] == False, reference_scene.mask[:,:,i] == False)
+                        
+            # Gain compensation (simple inter-scene correction)                    
+            this_intensity = np.mean(data.data[:,:,i][overlap])
+            ref_intensity = np.mean(reference_scene.data[:,:,i][overlap])
+            
+            sel = data.mask[:,:,i]==False
+            data.data[sel] = data[sel] * (ref_intensity/this_intensity)
+        """
         
-        # These are the values that represent forest. In the test map, it's only 1.
-        forest_key = np.array([1])
-        forest_px = np.in1d(landcover, forest_key).reshape(landcover.shape)
-        
-        
-        for feature in range(data.shape[2]):
+        for i in range(data.shape[-1]):
+            
+            overlap = np.logical_and(data.mask[:,:,i] == False, reference_scene.mask[:,:,i] == False)
 
-            if (data.mask==False).sum() != 0:
-                # np.percentile doesn't understand masked arrays, so calculate percentile one feature at a time
-                data_percentile[:,:,feature] = np.percentile(data.data[:,:,feature][np.logical_and(data.mask[:,:,feature]==False, forest_px)], normalisation_percentile)
-            else:
-                # This catches the case where there's no usable data in an image
-                data_percentile[:,:,feature] = 0
-
-    
+            # Standardise to match mean/stdev of overlap
+            ref_stdev = np.ma.std(reference_scene[:,:,i][overlap])
+            ref_mean = np.ma.mean(reference_scene[:,:,i][overlap])
+            this_stdev = np.ma.std(data.data[:,:,i][overlap])
+            this_mean = np.ma.mean(data.data[:,:,i][overlap])
+            
+            sel = data.mask[:,:,i]==False
+            data[sel, i] = ref_mean + (data[sel,i] - this_mean) * (ref_stdev / this_stdev)
+        
     # Get rid of residual dimensions where 2d array was input
     data = np.squeeze(data)
     data_percentile = np.squeeze(data_percentile)
         
     # And subtract the seasonal effect from the array
-    data_deseasonalised = data - data_percentile
+    data_normalised = data - data_percentile
     
-    return data_deseasonalised
+    return data_normalised
 
 
 def loadCoefficients(image_type):
@@ -757,7 +330,7 @@ def loadCoefficients(image_type):
     return np.array(coef), np.array(mean), np.array(scale)
 
 
-def rescaleData(data, means, scales):
+def _rescaleData(data, means, scales):
     '''
     Rescale data to match the scaling of training data
     
@@ -787,19 +360,9 @@ def classify(data, image_type, nodata = 255):
     
     assert image_type in ['S2', 'S1single', 'S1dual'], "image_type must be one of 'S2', 'S1single', or 'S1dual'. The classify() function was given %s."%image_type
     
-    coefs, means, scales = loadCoefficients(getImageType(infile))
+    coefs, means, scales = loadCoefficients(image_type)
     
-    #if getImageType(infile) == 'S1single':
-    #    # TODO: Update me
-    #    p_forest = (0.644 * data) + 1.182
-    #    
-    #elif getImageType(infile) == 'S1dual':
-    #    # TODO: Update me
-    #    p_forest = (0.316 * data[:,:,0]) + (0.462 * data[:,:,1]) + 1.205
-    #
-    #elif getImageType(infile) == 'S2':
-    #    
-    p_forest = np.sum(coefs[1:] * rescaleData(data, means, scales), axis = 2) + coefs[0]
+    p_forest = np.sum(coefs[1:] * _rescaleData(data, means, scales), axis = 2) + coefs[0]
     
     # Convert from odds to probability
     p_forest = np.exp(p_forest) / (1 + np.exp(p_forest))
@@ -811,86 +374,353 @@ def classify(data, image_type, nodata = 255):
     return p_forest_out
     
     
-def loadData(infile, S2_res = 20, output_dir = os.getcwd(), output_name = 'CLASSIFIED'):
+
+def findMatch(source_files, ref_month):
     '''
-    Loads data and metadata from a Sentinel-1 or Sentinel-2 file
-    
-    Args:
-        infile: Path to a Sentinel-1 .dim file or a Sentinel-2 GRANULE directory.
-        output_res: Output resolution, important for selecting correct Sentinel-2 file.
-    Returns:
-        A numpy array containing data, a dictionary containing file metadata, and a proposed output filename.
+    Scan through a set of Sentinel-2 GRANULE files, and locate the most appropriate scene to match each to for each one.
     '''
     
-    # Get source metadata
-    if getImageType(infile) == 'S1single' or getImageType(infile) == 'S1dual':
-        extent_source, EPSG_source, res_source, datetime, overpass = getS1Metadata(infile)
+    assert ref_month in range(1,13), "Normalisation month must be between 1 and 12."
     
-    elif getImageType(infile) == 'S2':
+    nodata, datetimes = [], []
     
-        # Select appropriate Sentinel-2 resolution. TODO: Deal with loading most appropriate scale
-        res_source = S2_res
-        extent_source, EPSG_source, datetime, tile = getS2Metadata(infile, resolution = S2_res)
+    source_files = np.array(source_files)
     
-    else:
-        print 'WARNING: infile %s does not match any known ImageTypes'%infile
-
-    # Build metadata dictionary    
-    md_source = buildMetadataDictionary(extent_source, res_source, EPSG_source)
+    for scene in source_files:
+        nodata.append(scene.nodata_percent)
+        datetimes.append(scene.datetime)
     
-    # Load data using appropriate function
-    if getImageType(infile) == 'S1single':
-        print 'Doing S1single...'
-        data = loadS1Single(infile, return_date = False)
-        output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), overpass, datetime.strftime("%Y%m%d_%H%M%S"))
+    nodata = np.array(nodata)
+    datetimes = np.array(datetimes)
     
-    elif getImageType(infile) == 'S1dual':
-        print 'Doing S1dual...'
-        data = loadS1Dual(infile)
-        output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), overpass, datetime.strftime("%Y%m%d_%H%M%S"))
+    years = datetimes.astype('datetime64[Y]').astype(int) + 1970
+    months = datetimes.astype('datetime64[M]').astype(int) % 12 + 1
     
-    elif getImageType(infile) == 'S2':
-        print 'Doing S2...'
-        data = loadS2(infile, res_source)
-        output_filename = '%s/%s_%s_%s_%s.tif'%(output_dir, output_name, getImageType(infile), tile, datetime.strftime("%Y%m%d_%H%M%S"))
-
-    else:
-        print 'WARNING: infile %s does not match any known ImageTypes'%infile
-
-    return data, md_source, output_filename
-
-
+    masked = 1
+    this_month = 1
     
+    out = []
+    im_date = []
+    
+    for year in np.unique(years):
         
+        for n, scene in enumerate(source_files[years == year]):
+                   
+            this_month = months[years == year][n]
+            
+            if np.logical_or(this_month < ref_month, this_month > ref_month + 1):
+                continue
+            
+            print scene.filename
+            
+            indices = loadS2(scene)
+            
+            if 'composite' not in locals():
+                composite = indices
+                im_date.append(scene.datetime)
+                
+            else:
+                
+                sel = np.logical_and(composite.mask, indices.mask==False)
+                
+                composite[sel] = indices[sel]
+            
+            # Re-calculate maked pixels
+            masked = float(composite.mask.sum()) / ((composite.mask==False).sum() + composite.mask.sum())
+            
+            # After 1 month data, quit if enough data present, or continue for another month until enough data
+            # Break if two months passed
+            if this_month > ref_month + 1:
+                break
+            if this_month == ref_month + 1 and masked > 0.75:
+                break
+                
+        # If year had any data
+        if 'composite' in locals():
+            out.append(composite)
+        
+            # Reset composite image
+            del composite
+      
+    # Determine which composite image should be used by each infile
+    inds = np.zeros_like(source_files, dtype=np.int)
     
+    # Use most recently measured composite (or upcoming if month not yet passed)
+    for n, date in enumerate(im_date):
+        inds[datetimes >= date] = n
+    
+    return out, inds
 
-def main(infile, extent_dest, EPSG_dest, output_res, output_dir = os.getcwd(), output_name = 'CLASSIFIED', normalisation_type = 'none', normalisation_percentile = 95):
+    
+def findMatch2(source_files, ref_month):
+    '''
+    Scan through a set of Sentinel-2 GRANULE files, and locate the most appropriate scene to match each to for each one.
+    '''
+    
+    assert ref_month in range(1,13), "Normalisation month must be between 1 and 12."
+    
+    nodata, datetimes = [], []
+    
+    source_files = np.array(source_files)
+    
+    for scene in source_files:
+        nodata.append(scene.nodata_percent)
+        datetimes.append(scene.datetime)
+    
+    nodata = np.array(nodata)
+    datetimes = np.array(datetimes)
+    
+    years = datetimes.astype('datetime64[Y]').astype(int) + 1970
+    months = datetimes.astype('datetime64[M]').astype(int) % 12 + 1
+    
+    masked = 1
+    this_month = 1
+    
+    out = []
+    im_date = []
+    
+    for year in np.unique(years):
+        
+        for n, scene in enumerate(source_files[years == year]):
+                   
+            this_month = months[years == year][n]
+                        
+            print scene.filename
+            
+            indices = loadS2(scene)
+            
+            if 'composite' not in locals():
+                composite = np.ma.array(np.zeros_like(indices).data)
+                composite[indices.mask == False] = indices[indices.mask == False]
+                im_date.append(scene.datetime)
+                count = np.zeros_like(composite[:,:,0].data)
+                
+            else:
+                                
+                composite[indices.mask == False] += indices[indices.mask == False]
+            
+            count[(indices.mask == False)[:,:,0]] += 1
+        
+        composite = composite / count.astype(np.float)[:,:,np.newaxis]       
+        
+        # If year had any data
+        if 'composite' in locals():
+            out.append(composite)
+        
+            # Reset composite image
+            del composite
+        
+    # Determine which composite image should be used by each infile
+    inds = np.zeros_like(source_files, dtype=np.int)
+    
+    # Use most recently measured composite (or upcoming if month not yet passed)
+    for n, date in enumerate(im_date):
+        inds[datetimes >= date] = n
+    
+    return out, inds
+
+          
+
+def getOutputName(scene, output_dir = os.getcwd(), output_name = 'classified'):
+    '''
+    '''
+    
+    output_dir = output_dir.rstrip('/')
+    
+    output_name = '%s/%s_%s_%s_%s_%s.tif'%(output_dir, output_name, scene.image_type, scene.tile, datetime.datetime.strftime(scene.datetime, '%Y%m%d'), datetime.datetime.strftime(scene.datetime, '%H%M%S'))
+
+    return output_name
+
+
+"""
+def getTileMetadata(tile, resolution):
+    '''
+    '''
+    
+    from osgeo import ogr, osr
+    import lxml.etree as ET
+    
+    assert sen2mosaic.utilities.validateTile(tile), "Invalid tile format. Tile must take the format '##XXX'."
+    assert resolution in [10, 20, 60], "Resolution must be 10, 20 or 60 m."
+    
+    # Get location of current file
+    directory = os.path.dirname(os.path.abspath(__file__))
+    #directory = os.getcwd()
+    kml_file =  glob.glob('%s/cfg/S2A_OPER_GIP_*_B00.kml'%'/'.join(directory.split('/')[:-1]))[0]
+    
+    tree = ET.parse(kml_file)
+    root = tree.getroot()
+    
+    # Define xml namespace
+    xmlns = {'xmlns':root.tag[1:].split('}')[0]}
+    
+    placemarks = root.findall('.//xmlns:Placemark', xmlns)
+    tiles = np.array([placemark.find('xmlns:name',xmlns).text for placemark in placemarks])
+    
+    # For this tile
+    placemark = placemarks[np.where(tiles == tile)[0][0]]
+    
+    polygon = placemark.find('.//xmlns:Polygon', xmlns)
+    
+    coordinates = polygon.find('.//xmlns:coordinates', xmlns).text
+    coordinates = coordinates.replace('\n','')
+    coordinates = coordinates.replace('\t','')
+    
+    minlon = min(float(coordinates.split(' ')[0].split(',')[0]), float(coordinates.split(' ')[3].split(',')[0]))
+    maxlon = max(float(coordinates.split(' ')[1].split(',')[0]), float(coordinates.split(' ')[2].split(',')[0]))
+    minlat = min(float(coordinates.split(' ')[3].split(',')[1]), float(coordinates.split(' ')[4].split(',')[1]))
+    maxlat = max(float(coordinates.split(' ')[0].split(',')[1]), float(coordinates.split(' ')[1].split(',')[1]))
+    
+    # N or S hemisphere:
+    point = placemark.find('.//xmlns:Point', xmlns)
+    coordinates = point.find('.//xmlns:coordinates', xmlns).text
+
+    utm_zone = int(tile[:2])
+    
+    if float(coordinates.split(',')[1]) < 0:
+        EPSG_code = 32700 + utm_zone
+    else:
+        EPSG_code = 32600 + utm_zone
+            
+    # create coordinate transformation
+    inSpatialRef = osr.SpatialReference()
+    inSpatialRef.ImportFromEPSG(4326)
+
+    outSpatialRef = osr.SpatialReference()
+    outSpatialRef.ImportFromEPSG(EPSG_code)
+    
+    coordTransform = osr.CoordinateTransformation(inSpatialRef, outSpatialRef)
+    
+    xmin, ymin, z = coordTransform.TransformPoint(minlon, minlat)
+    xmax, ymax, z = coordTransform.TransformPoint(maxlon, maxlat)
+    
+    return sen2mosaic.utilities.Metadata([xmin, ymin, xmax, ymax], resolution, EPSG_code)
+
+"""
+
+def getTileMetadata(tile, resolution):
+    '''
+    '''
+    
+    import pandas as pd
+    
+    assert sen2mosaic.utilities.validateTile(tile), "Invalid tile format. Tile must take the format '##XXX'."
+    assert resolution in [10, 20, 60], "Resolution must be 10, 20 or 60 m."
+    
+    # Get location of metadata csv file
+    directory = os.path.dirname(os.path.abspath(__file__))
+    csv_file =  glob.glob('%s/cfg/S2_tile_metadata.csv'%'/'.join(directory.split('/')[:-1]))[0]
+    
+    # Load S2 tile metadata as pandas dataframe
+    df = pd.read_csv(csv_file, sep = ',')
+    
+    assert sum(df['Tile'] == tile) > 0, "Sentinel-2 tile %s not recognised (see S2_tile_metadata.csv for Sentinel-2 tile metadata)."%tile
+    
+    # Get extent
+    xmin = int(df.loc[df['Tile'] == tile, 'Xmin'])
+    ymin = int(df.loc[df['Tile'] == tile, 'Ymin'])
+    xmax = int(df.loc[df['Tile'] == tile, 'Xmax'])
+    ymax = int(df.loc[df['Tile'] == tile, 'Ymax'])
+    
+    # Get EPSG code
+    EPSG_code = int(df.loc[df['Tile'] == tile, 'EPSG_Code'])
+
+    return sen2mosaic.utilities.Metadata([xmin, ymin, xmax, ymax], resolution, EPSG_code)
+
+
+def main(tile, source_files, resolution = 20, output_dir = os.getcwd(), output_name = 'classified', normalisation_type = 'none', normalisation_percentile = 95, normalisation_area = 200000., normalisation_month = 7):
     """
     """
     
     from osgeo import gdal
+    
+    # Determine output extent and projection
+    #md_dest = getTileMetadata(tile, resolution)
+    
+    # Load scenes
+    scenes = [sen2mosaic.utilities.LoadScene(source_file, resolution = resolution) for source_file in source_files]
+    
+    # Remove scenes that aren't within output extent
+    #scenes = sen2mosaic.utilities.getSourceFilesInTile(scenes, md_dest)
+    
+    # Sort by date
+    scenes = sen2mosaic.utilities.sortScenes(scenes, by = 'date')
+    
+    # To be formalised: remove any scene which isn't from this S2 tile
+    scenes_out = []
+    for scene in scenes:
+        if scene.tile == 'T%s'%tile:
+            scenes_out.append(scene)
+    scenes = scenes_out
+    
+    if normalisation_type == 'match' or normalisation_type == 'stratify':
+        reference_scene, inds = findMatch(scenes, normalisation_month)
+        if normalisation_type == 'stratify':
+            
+            from sklearn import cluster
+            k_means = cluster.KMeans(n_clusters=6)
+            X = reference_scene[1].reshape((1830*1830,5))
+            mask = np.sum(X.mask,axis=1) > 0
+            k_means.fit(X.data[mask==False])
+            
+            normalisation_class = np.zeros_like(reference_scene[1][:,:,0].data)
+            normalisation_class[mask.reshape((1830,1830))==False] = k_means.labels_ + 1
+            
+            #normalisation_class = np.array(np.round(reference_scene[0][:,:,0] * 10,0),dtype=np.int)
+            #normalisation_class[normalisation_class < 1] = 0
+            
+            ds = _createGdalDataset(scene.metadata, data_out = normalisation_class, filename = output_dir + 'STRATIFY_CLASS.tif', driver='GTiff', dtype = gdal.GDT_Byte, options=['COMPRESS=LZW'])
         
-    assert '_' not in output_name, "Sorry, output_name may not include the character '_'."
-    
-    # Load data, source metadata, and generate an output filename. S2_res currently hardwired. TODO: Deal with loading most appropriate data
-    data, md_source, output_filename = loadData(infile, S2_res = 20, output_dir = output_dir, output_name = output_name)
-    
-    # Generate output metadata
-    md_dest = buildMetadataDictionary(extent_dest, output_res, EPSG_dest)
-    
-    # Deseasonalise data
-    data_deseasonalised = deseasonalise(data, md_source, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile)
-
-    # Resample data to output CRS
-    data_resampled = subset(data_deseasonalised, md_source, md_dest, dtype = 7)
-    
-    # Classify the data into probability of a pixel being forest
-    p_forest = classify(data_resampled, getImageType(infile))
+    for n, scene in enumerate(scenes):
+        print 'Doing %s'%scene.filename.split('/')[-1]
+                
+        # Load indices
+        if normalisation_type == 'match':
+            indices = loadS2(scene, normalisation_type = normalisation_type, reference_scene = reference_scene[inds[n]])
         
-    # Save data to disk
-    ds = _createGdalDataset(md_dest, data_out = p_forest, filename = output_filename, nodata = 255, driver='GTiff', dtype = gdal.GDT_Byte, options=['COMPRESS=LZW'])
-    
-    
+        elif normalisation_type == 'stratify':
+            indices = loadS2(scene, normalisation_type = 'none')
+        
+        else:
+            indices = loadS2(scene, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile, normalisation_area = normalisation_area)
+        
+        if normalisation_type != 'stratify':
+            print np.ma.mean(indices[:,:,0])
+            p_forest = classify(indices, scene.image_type)
+            p_forest = np.ma.array(p_forest,mask = p_forest == 255)
+        
+        else:
+            import scipy.stats
+            p_forest = np.zeros_like(reference_scene[0].data[:,:,0])
+            for i in range(1,7):
+                from statsmodels.robust.scale import huber
+                try:
+                    mean_robust, std_robust = huber(indices[:,:,0][normalisation_class==i])
+                    z_score = (indices[:,:,0][normalisation_class==i] - mean_robust) / std_robust
+                    
+                except:
+                    z_score = scipy.stats.mstats.zscore(indices[:,:,0][normalisation_class==i])
+                
+                p_forest[normalisation_class==i] = z_score#scipy.special.ndtr()
+                #pdb.set_trace()
+                
+                #from sklearn.covariance import MinCovDet
+                #X = indices[normalisation_class==i]
+                #robust_cov = MinCovDet().fit(X)
+                #robust_mahal = robust_cov.mahalanobis(X - robust_cov.location_) ** (0.33)
+                
+                #from sklearn.neighbors import LocalOutlierFactor
+                #clf = LocalOutlierFactor(n_neighbors=20)
+                #y_pred = clf.fit_predict(X)
+            
+            p_forest = np.ma.array(p_forest,mask = np.logical_or(normalisation_class==0, indices[:,:,0].mask))
+                    
+        
+        this_output_name = getOutputName(scene, output_dir = output_dir, output_name = output_name)
+        
+        # Save data to disk
+        #ds = _createGdalDataset(scene.metadata, data_out = p_forest, filename = this_output_name, nodata = 255, driver='GTiff', dtype = gdal.GDT_Byte, options=['COMPRESS=LZW'])
+        ds = _createGdalDataset(scene.metadata, data_out = p_forest.data, filename = this_output_name, driver='GTiff', dtype = gdal.GDT_Float32, options=['COMPRESS=LZW'])
 
 if __name__ == '__main__':
     '''
@@ -904,15 +734,16 @@ if __name__ == '__main__':
     optional = parser.add_argument_group('optional arguments')
 
     # Required arguments
-    required.add_argument('infiles', metavar = 'FILES', type = str, nargs = '+', help = 'Sentinel-1 processed input files in .dim format or a Sentinel-2 granule. Specify a valid S1/S2 input file or multiple files through wildcards (e.g. PATH/TO/*.dim, PATH/TO.SAFE/GRANULE/*/).')
-    required.add_argument('-te', '--target_extent', nargs = 4, metavar = ('XMIN', 'YMIN', 'XMAX', 'YMAX'), type = float, help = "Extent of output image tile, in format <xmin, ymin, xmax, ymax>.")
-    required.add_argument('-e', '--epsg', type=int, metavar = 'EPSG', help="EPSG code for output image tile CRS. This must be UTM. Find the EPSG code of your output CRS as https://www.epsg-registry.org/.")
-    required.add_argument('-r', '--resolution', type=float, metavar = 'RES', help="Output resolution in m.")
+    required.add_argument('-t', '--tile', metavar = '##XXX', type = str, help = "Deforest uses the Sentinel-2 tiling grid to produce outputs. Specify a valid Sentinel-2 tile in the format ##XXX.")
     
     # Optional arguments
+    optional.add_argument('infiles', metavar = 'L2A_FILES', type = str, default = [os.getcwd()], nargs = '*', help = 'Sentinel 2 input files (level 2A) in .SAFE format. Specify one or more valid Sentinel-2 .SAFE, a directory containing .SAFE files, or multiple granules through wildcards (e.g. *.SAFE/GRANULE/*). Defaults to processing all granules in current working directory.')
+    optional.add_argument('-r', '--resolution', metavar = 'N', type = int, default = 20, help = 'Resolution to process. Must be 10, 20 or 60 m.')
     optional.add_argument('-nt', '--normalisation_type', type=str, metavar = 'STR', default = 'none', help="Normalisation type. Set to one of 'none', 'local' or 'global'. Defaults to 'none'.")
     optional.add_argument('-np', '--normalisation_percentile', type=int, metavar = 'N', default = 95, help="Normalisation percentile, in case where normalisation type set to  'local' or 'global'. Defaults to 95 percent.")
-    optional.add_argument('-o', '--output_dir', type=str, metavar = 'DIR', default = os.getcwd(), help="Optionally specify an output directory. If nothing specified, downloads will output to the present working directory, given a standard filename.")
+    optional.add_argument('-na', '--normalisation_area', type=float, metavar = 'N', default = 200000., help="Normalisation area. Defaults to 200000 m^2.")
+    optional.add_argument('-nm', '--normalisation_month', type=int, metavar = 'N', default = 7, help="If using 'match' image normalisation, each image will be corrected using the histogram of a single month. Specify months as 1-12 (January - December), defaults to 7 (July).")
+    optional.add_argument('-o', '--output_dir', type=str, metavar = 'DIR', default = os.getcwd(), help="Optionally specify an output directory")
     optional.add_argument('-n', '--output_name', type=str, metavar = 'NAME', default = 'CLASSIFIED', help="Optionally specify a string to precede output filename.")
         
     # Get arguments
@@ -921,12 +752,8 @@ if __name__ == '__main__':
     # Get absolute path of input .safe files.
     infiles = [os.path.abspath(i) for i in args.infiles]
     
-    # Slim down input files to only those that fall within tile
-    md_dest = buildMetadataDictionary(args.target_extent, args.resolution, args.epsg)
+    # Find files from input directory/granule etc.
+    infiles = sen2mosaic.utilities.prepInfiles(infiles, '2A')
     
-    infiles = getFilesInTile(args.infiles, md_dest)
-    
-    for infile in infiles:
-        
-        # Execute script
-        main(infile, args.target_extent, args.epsg, args.resolution, output_dir = args.output_dir, output_name = args.output_name, normalisation_type = args.normalisation_type, normalisation_percentile = args.normalisation_percentile)
+    # Execute script
+    main(args.tile, infiles, resolution = args.resolution, output_dir = args.output_dir, output_name = args.output_name, normalisation_type = args.normalisation_type, normalisation_percentile = args.normalisation_percentile, normalisation_area = args.normalisation_area, normalisation_month = args.normalisation_month)
