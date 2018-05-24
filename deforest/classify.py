@@ -13,8 +13,10 @@ import scipy.ndimage
 
 import sys
 sys.path.insert(0, '/exports/csce/datastore/geos/users/sbowers3/sen2mosaic')
+sys.path.insert(0, '/exports/csce/datastore/geos/users/sbowers3/sen1mosaic')
 
 import sen2mosaic.utilities
+import sen1mosaic.utilities
 
 import pdb
 
@@ -43,8 +45,8 @@ def loadS1Single(scene, polarisation = 'VV', normalise = True):
     data = np.ma.array(data, mask = data == 0)
     
     # Normalise
-    if normalise:
-        data = normalise(data, scene.metadata, normalisation_type = scene.normalisation_type, normalisation_percentile = scene.normalisation_percentile, normalisation_area = scene.normalisation_area)
+    #if normalise:
+    #    wdata = normalise(data, scene.metadata, normalisation_type = scene.normalisation_type, normalisation_percentile = scene.normalisation_percentile, normalisation_area = scene.normalisation_area)
     
     return data
 
@@ -70,7 +72,7 @@ def loadS1Dual(scene):
     
     data = np.ma.vstack((VV, VH, VV_VH))
     
-    data = normalise(data, scene.metadata, normalisation_type = scene.normalisation_type, normalisation_percentile = scene.normalisation_percentile, normalisation_area = scene.normalisation_area)
+    #data = normalise(data, scene.metadata, normalisation_type = scene.normalisation_type, normalisation_percentile = scene.normalisation_percentile, normalisation_area = scene.normalisation_area)
     
     return data
 
@@ -138,7 +140,7 @@ def loadS2(scene, normalisation_type = 'none', normalisation_percentile = 95, no
         indices = np.ma.array(indices, mask = np.repeat(np.expand_dims(mask,2), indices.shape[-1], axis=2))
         
     # Normalise data
-    indices = normalise(indices, scene.metadata, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile, normalisation_area = normalisation_area, reference_scene = reference_scene)
+    #indices = normalise(indices, scene.metadata, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile, normalisation_area = normalisation_area, reference_scene = reference_scene)
     
     return indices
 
@@ -382,15 +384,13 @@ def findMatch(source_files, ref_month):
     
     assert ref_month in range(1,13), "Normalisation month must be between 1 and 12."
     
-    nodata, datetimes = [], []
+    datetimes = []
     
     source_files = np.array(source_files)
     
     for scene in source_files:
-        nodata.append(scene.nodata_percent)
         datetimes.append(scene.datetime)
     
-    nodata = np.array(nodata)
     datetimes = np.array(datetimes)
     
     years = datetimes.astype('datetime64[Y]').astype(int) + 1970
@@ -413,8 +413,15 @@ def findMatch(source_files, ref_month):
             
             print scene.filename
             
-            indices = loadS2(scene)
-            
+            if scene.image_type == 'S1single':
+                indices = loadS1Single(scene)
+            elif scene.image_type == 'S1dual':
+                indices = loadS1Dual(scene)
+            elif scene.image_type == 'S2':
+                indices = loadS2(scene)
+            else:
+                raise IOError
+                        
             if 'composite' not in locals():
                 composite = indices
                 im_date.append(scene.datetime)
@@ -532,145 +539,49 @@ def getOutputName(scene, output_dir = os.getcwd(), output_name = 'classified'):
     return output_name
 
 
-"""
-def getTileMetadata(tile, resolution):
+def getS2Res(resolution):
     '''
     '''
     
-    from osgeo import ogr, osr
-    import lxml.etree as ET
-    
-    assert sen2mosaic.utilities.validateTile(tile), "Invalid tile format. Tile must take the format '##XXX'."
-    assert resolution in [10, 20, 60], "Resolution must be 10, 20 or 60 m."
-    
-    # Get location of current file
-    directory = os.path.dirname(os.path.abspath(__file__))
-    #directory = os.getcwd()
-    kml_file =  glob.glob('%s/cfg/S2A_OPER_GIP_*_B00.kml'%'/'.join(directory.split('/')[:-1]))[0]
-    
-    tree = ET.parse(kml_file)
-    root = tree.getroot()
-    
-    # Define xml namespace
-    xmlns = {'xmlns':root.tag[1:].split('}')[0]}
-    
-    placemarks = root.findall('.//xmlns:Placemark', xmlns)
-    tiles = np.array([placemark.find('xmlns:name',xmlns).text for placemark in placemarks])
-    
-    # For this tile
-    placemark = placemarks[np.where(tiles == tile)[0][0]]
-    
-    polygon = placemark.find('.//xmlns:Polygon', xmlns)
-    
-    coordinates = polygon.find('.//xmlns:coordinates', xmlns).text
-    coordinates = coordinates.replace('\n','')
-    coordinates = coordinates.replace('\t','')
-    
-    minlon = min(float(coordinates.split(' ')[0].split(',')[0]), float(coordinates.split(' ')[3].split(',')[0]))
-    maxlon = max(float(coordinates.split(' ')[1].split(',')[0]), float(coordinates.split(' ')[2].split(',')[0]))
-    minlat = min(float(coordinates.split(' ')[3].split(',')[1]), float(coordinates.split(' ')[4].split(',')[1]))
-    maxlat = max(float(coordinates.split(' ')[0].split(',')[1]), float(coordinates.split(' ')[1].split(',')[1]))
-    
-    # N or S hemisphere:
-    point = placemark.find('.//xmlns:Point', xmlns)
-    coordinates = point.find('.//xmlns:coordinates', xmlns).text
-
-    utm_zone = int(tile[:2])
-    
-    if float(coordinates.split(',')[1]) < 0:
-        EPSG_code = 32700 + utm_zone
+    if resolution < 60:
+        return 20
     else:
-        EPSG_code = 32600 + utm_zone
-            
-    # create coordinate transformation
-    inSpatialRef = osr.SpatialReference()
-    inSpatialRef.ImportFromEPSG(4326)
+        return 60
+    
 
-    outSpatialRef = osr.SpatialReference()
-    outSpatialRef.ImportFromEPSG(EPSG_code)
-    
-    coordTransform = osr.CoordinateTransformation(inSpatialRef, outSpatialRef)
-    
-    xmin, ymin, z = coordTransform.TransformPoint(minlon, minlat)
-    xmax, ymax, z = coordTransform.TransformPoint(maxlon, maxlat)
-    
-    return sen2mosaic.utilities.Metadata([xmin, ymin, xmax, ymax], resolution, EPSG_code)
-
-"""
-
-def getTileMetadata(tile, resolution):
-    '''
-    '''
-    
-    import pandas as pd
-    
-    assert sen2mosaic.utilities.validateTile(tile), "Invalid tile format. Tile must take the format '##XXX'."
-    assert resolution in [10, 20, 60], "Resolution must be 10, 20 or 60 m."
-    
-    # Get location of metadata csv file
-    directory = os.path.dirname(os.path.abspath(__file__))
-    csv_file =  glob.glob('%s/cfg/S2_tile_metadata.csv'%'/'.join(directory.split('/')[:-1]))[0]
-    
-    # Load S2 tile metadata as pandas dataframe
-    df = pd.read_csv(csv_file, sep = ',')
-    
-    assert sum(df['Tile'] == tile) > 0, "Sentinel-2 tile %s not recognised (see S2_tile_metadata.csv for Sentinel-2 tile metadata)."%tile
-    
-    # Get extent
-    xmin = int(df.loc[df['Tile'] == tile, 'Xmin'])
-    ymin = int(df.loc[df['Tile'] == tile, 'Ymin'])
-    xmax = int(df.loc[df['Tile'] == tile, 'Xmax'])
-    ymax = int(df.loc[df['Tile'] == tile, 'Ymax'])
-    
-    # Get EPSG code
-    EPSG_code = int(df.loc[df['Tile'] == tile, 'EPSG_Code'])
-
-    return sen2mosaic.utilities.Metadata([xmin, ymin, xmax, ymax], resolution, EPSG_code)
-
-
-def main(tile, source_files, resolution = 20, output_dir = os.getcwd(), output_name = 'classified', normalisation_type = 'none', normalisation_percentile = 95, normalisation_area = 200000., normalisation_month = 7):
+def main(source_files, target_extent, resolution, EPSG_code, output_dir = os.getcwd(), output_name = 'classified'):
     """
     """
     
     from osgeo import gdal
-    
+       
     # Determine output extent and projection
-    #md_dest = getTileMetadata(tile, resolution)
+    md_dest = sen2mosaic.utilities.Metadata(target_extent, resolution, EPSG_code)
     
     # Load scenes
-    scenes = [sen2mosaic.utilities.LoadScene(source_file, resolution = resolution) for source_file in source_files]
+    scenes = []
+    for source_file in source_files:
+        try:
+            scenes.append(sen2mosaic.utilities.LoadScene(source_file, resolution = getS2Res(resolution)))
+        except AssertionError:
+            continue
+        except IOError:
+            try:
+                scenes.append(sen1mosaic.utilities.LoadScene(source_file))
+            except:
+                pdb.set_trace()
+                continue
     
     # Remove scenes that aren't within output extent
-    #scenes = sen2mosaic.utilities.getSourceFilesInTile(scenes, md_dest)
+    scenes = sen2mosaic.utilities.getSourceFilesInTile(scenes, md_dest)
     
     # Sort by date
-    scenes = sen2mosaic.utilities.sortScenes(scenes, by = 'date')
+    scenes = [scene for _,scene in sorted(zip([s.datetime.date() for s in scenes],scenes))]
     
-    # To be formalised: remove any scene which isn't from this S2 tile
-    scenes_out = []
-    for scene in scenes:
-        if scene.tile == 'T%s'%tile:
-            scenes_out.append(scene)
-    scenes = scenes_out
-    
-    if normalisation_type == 'match' or normalisation_type == 'stratify':
-        reference_scene, inds = findMatch(scenes, normalisation_month)
-        if normalisation_type == 'stratify':
+    # STOP 24/05/2018. Next: sort reprojection.
+    # Build reference scenes
+    reference_scene, inds = findMatch(scenes, 7)
             
-            from sklearn import cluster
-            k_means = cluster.KMeans(n_clusters=6)
-            X = reference_scene[1].reshape((1830*1830,5))
-            mask = np.sum(X.mask,axis=1) > 0
-            k_means.fit(X.data[mask==False])
-            
-            normalisation_class = np.zeros_like(reference_scene[1][:,:,0].data)
-            normalisation_class[mask.reshape((1830,1830))==False] = k_means.labels_ + 1
-            
-            #normalisation_class = np.array(np.round(reference_scene[0][:,:,0] * 10,0),dtype=np.int)
-            #normalisation_class[normalisation_class < 1] = 0
-            
-            ds = _createGdalDataset(scene.metadata, data_out = normalisation_class, filename = output_dir + 'STRATIFY_CLASS.tif', driver='GTiff', dtype = gdal.GDT_Byte, options=['COMPRESS=LZW'])
-        
     for n, scene in enumerate(scenes):
         print 'Doing %s'%scene.filename.split('/')[-1]
                 
@@ -728,32 +639,30 @@ if __name__ == '__main__':
     
     # Set up command line parser
     parser = argparse.ArgumentParser(description = "Process Sentinel-1 and Sentinel-2 to match a predefined CRS, and perform a deseasaonalisation operation to reduce the impact of seasonality on relfectance/backscsatter.")
-
+    
     parser._action_groups.pop()
     required = parser.add_argument_group('required arguments')
     optional = parser.add_argument_group('optional arguments')
-
+    
     # Required arguments
-    required.add_argument('-t', '--tile', metavar = '##XXX', type = str, help = "Deforest uses the Sentinel-2 tiling grid to produce outputs. Specify a valid Sentinel-2 tile in the format ##XXX.")
+    required.add_argument('-te', '--target_extent', nargs = 4, metavar = ('XMIN', 'YMIN', 'XMAX', 'YMAX'), type = float, help = "Extent of output image tile, in format <xmin, ymin, xmax, ymax>.")
+    required.add_argument('-e', '--epsg', type=int, help="EPSG code for output image tile CRS. This must be UTM. Find the EPSG code of your output CRS as https://www.epsg-registry.org/.")
+    optional.add_argument('-res', '--resolution', metavar = 'N', type=int, help="Specify a resolution to output.")
     
     # Optional arguments
-    optional.add_argument('infiles', metavar = 'L2A_FILES', type = str, default = [os.getcwd()], nargs = '*', help = 'Sentinel 2 input files (level 2A) in .SAFE format. Specify one or more valid Sentinel-2 .SAFE, a directory containing .SAFE files, or multiple granules through wildcards (e.g. *.SAFE/GRANULE/*). Defaults to processing all granules in current working directory.')
-    optional.add_argument('-r', '--resolution', metavar = 'N', type = int, default = 20, help = 'Resolution to process. Must be 10, 20 or 60 m.')
-    optional.add_argument('-nt', '--normalisation_type', type=str, metavar = 'STR', default = 'none', help="Normalisation type. Set to one of 'none', 'local' or 'global'. Defaults to 'none'.")
-    optional.add_argument('-np', '--normalisation_percentile', type=int, metavar = 'N', default = 95, help="Normalisation percentile, in case where normalisation type set to  'local' or 'global'. Defaults to 95 percent.")
-    optional.add_argument('-na', '--normalisation_area', type=float, metavar = 'N', default = 200000., help="Normalisation area. Defaults to 200000 m^2.")
-    optional.add_argument('-nm', '--normalisation_month', type=int, metavar = 'N', default = 7, help="If using 'match' image normalisation, each image will be corrected using the histogram of a single month. Specify months as 1-12 (January - December), defaults to 7 (July).")
+    optional.add_argument('infiles', metavar = 'FILES', type = str, default = [os.getcwd()], nargs = '*', help = 'Sentinel 2 input files (level 2A) in .SAFE format, Sentinel-1 input files in .dim format, or a mixture. Specify one or more valid Sentinel-2 .SAFE, a directory containing .SAFE files, or multiple granules through wildcards (e.g. *.SAFE/GRANULE/*). Defaults to processing all granules in current working directory.')
     optional.add_argument('-o', '--output_dir', type=str, metavar = 'DIR', default = os.getcwd(), help="Optionally specify an output directory")
     optional.add_argument('-n', '--output_name', type=str, metavar = 'NAME', default = 'CLASSIFIED', help="Optionally specify a string to precede output filename.")
-        
+    
     # Get arguments
     args = parser.parse_args()
-
+    
     # Get absolute path of input .safe files.
     infiles = [os.path.abspath(i) for i in args.infiles]
     
     # Find files from input directory/granule etc.
-    infiles = sen2mosaic.utilities.prepInfiles(infiles, '2A')
+    infiles_S2 = sen2mosaic.utilities.prepInfiles(infiles, '2A')
+    infiles_S1 = sen1mosaic.utilities.prepInfiles(infiles)
     
     # Execute script
-    main(args.tile, infiles, resolution = args.resolution, output_dir = args.output_dir, output_name = args.output_name, normalisation_type = args.normalisation_type, normalisation_percentile = args.normalisation_percentile, normalisation_area = args.normalisation_area, normalisation_month = args.normalisation_month)
+    main(infiles_S2 + infiles_S1, args.target_extent, args.resolution, args.epsg, output_dir = args.output_dir, output_name = args.output_name)
