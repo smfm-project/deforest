@@ -22,7 +22,7 @@ import pdb
 
 
 
-def loadS1Single(scene, polarisation = 'VV', normalise = True):
+def loadS1Single(scene, md_dest, polarisation = 'VV'):
     """
     Extract backscatter data given .dim file and polarisation
     
@@ -34,15 +34,8 @@ def loadS1Single(scene, polarisation = 'VV', normalise = True):
         A maked numpy array of backscatter.
     """
     
-    
-    # Remove trailing slash from input filename, if it exists, and determine path of data file
-    data_file = scene.filename[:-4] + '.data'
-     
-    # Load data
-    data = gdal.Open('%s/Gamma0_%s.img'%(data_file,polarisation)).ReadAsArray()
-        
-    # Get mask (where backscatter is 0)
-    data = np.ma.array(data, mask = data == 0)
+    mask = scene.getMask(md = md_dest)
+    data = scene.getBand(polarisation, md = md_dest)
     
     # Normalise
     #if normalise:
@@ -51,7 +44,7 @@ def loadS1Single(scene, polarisation = 'VV', normalise = True):
     return data
 
 
-def loadS1Dual(scene):
+def loadS1Dual(scene, md_dest):
     """
     Extract backscatter metrics from a dual-polarised Sentinel-1 image.
     
@@ -64,9 +57,9 @@ def loadS1Dual(scene):
     
     assert scene.image_type == 'S1dual', "input file %s does not appear to be a dual polarised Sentinel-1 file"%dim_file
         
-    VV = loadS1Single(scene.filename, polarisation = 'VV', normalise = False)
+    VV = loadS1Single(scene.filename, md_dest, polarisation = 'VV')
     
-    VH = loadS1Single(scene.filename, polarisation = 'VH', normalise = False)
+    VH = loadS1Single(scene.filename, md_dest, polarisation = 'VH')
     
     VV_VH = VH - VV # Proportional difference, logarithmic
     
@@ -80,7 +73,7 @@ def loadS1Dual(scene):
 
 
 
-def loadS2(scene, normalisation_type = 'none', normalisation_percentile = 95, normalisation_area = 200000, reference_scene = None):
+def loadS2(scene, md_dest):
     """
     Calculate a range of vegetation indices given .SAFE file and resolution.
     
@@ -91,22 +84,22 @@ def loadS2(scene, normalisation_type = 'none', normalisation_percentile = 95, no
         A maked numpy array of vegetation indices.
     """
        
-    mask = scene.getMask(correct = True)
+    mask = scene.getMask(correct = True, md = md_dest)
     
     # Convert mask to a boolean array, allowing only values of 4 (vegetation), 5 (bare sois), and 6 (water)
     mask = np.logical_or(mask < 4, mask > 6)
     
     # Load the data (as masked numpy array)
-    blue = scene.getBand('B02')[mask == False] / 10000.
-    green = scene.getBand('B03')[mask == False] / 10000.
-    red = scene.getBand('B04')[mask == False] / 10000.
-    swir1 = scene.getBand('B11')[mask == False] / 10000.
-    swir2 = scene.getBand('B12')[mask == False] / 10000.
+    blue = scene.getBand('B02', md = md_dest)[mask == False] / 10000.
+    green = scene.getBand('B03', md = md_dest)[mask == False] / 10000.
+    red = scene.getBand('B04', md = md_dest)[mask == False] / 10000.
+    swir1 = scene.getBand('B11', md = md_dest)[mask == False] / 10000.
+    swir2 = scene.getBand('B12', md = md_dest)[mask == False] / 10000.
     
     if scene.resolution == 10:
-        nir = scene.getBand('B08')[mask == False] / 10000.
+        nir = scene.getBand('B08', md = md_dest)[mask == False] / 10000.
     else:
-        nir = scene.getBand('B8A')[mask == False] / 10000.
+        nir = scene.getBand('B8A', md = md_dest)[mask == False] / 10000.
        
     # Calculate vegetation indices from Shultz 2016
     indices = np.zeros((mask.shape[0], mask.shape[1], 5), dtype = np.float32)
@@ -377,7 +370,7 @@ def classify(data, image_type, nodata = 255):
     
     
 
-def findMatch(source_files, ref_month):
+def buildReferenceScenes(source_files, ref_month, md_dest):
     '''
     Scan through a set of Sentinel-2 GRANULE files, and locate the most appropriate scene to match each to for each one.
     '''
@@ -414,11 +407,11 @@ def findMatch(source_files, ref_month):
             print scene.filename
             
             if scene.image_type == 'S1single':
-                indices = loadS1Single(scene)
+                indices = loadS1Single(scene, md_dest)
             elif scene.image_type == 'S1dual':
-                indices = loadS1Dual(scene)
+                indices = loadS1Dual(scene, md_dest)
             elif scene.image_type == 'S2':
-                indices = loadS2(scene)
+                indices = loadS2(scene, md_dest)
             else:
                 raise IOError
                         
@@ -569,7 +562,6 @@ def main(source_files, target_extent, resolution, EPSG_code, output_dir = os.get
             try:
                 scenes.append(sen1mosaic.utilities.LoadScene(source_file))
             except:
-                pdb.set_trace()
                 continue
     
     # Remove scenes that aren't within output extent
@@ -578,60 +570,26 @@ def main(source_files, target_extent, resolution, EPSG_code, output_dir = os.get
     # Sort by date
     scenes = [scene for _,scene in sorted(zip([s.datetime.date() for s in scenes],scenes))]
     
-    # STOP 24/05/2018. Next: sort reprojection.
     # Build reference scenes
-    reference_scene, inds = findMatch(scenes, 7)
-            
+    reference_scene, inds = buildReferenceScenes(scenes, 7, md_dest)
+    
+    
     for n, scene in enumerate(scenes):
         print 'Doing %s'%scene.filename.split('/')[-1]
-                
-        # Load indices
-        if normalisation_type == 'match':
-            indices = loadS2(scene, normalisation_type = normalisation_type, reference_scene = reference_scene[inds[n]])
         
-        elif normalisation_type == 'stratify':
-            indices = loadS2(scene, normalisation_type = 'none')
+        indices = loadS2(scene, md_dest)
         
-        else:
-            indices = loadS2(scene, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile, normalisation_area = normalisation_area)
+        indices = normalise(indices, md_dest, normalisation_type = 'match', reference_scene = reference_scene[inds[n]])
         
-        if normalisation_type != 'stratify':
-            print np.ma.mean(indices[:,:,0])
-            p_forest = classify(indices, scene.image_type)
-            p_forest = np.ma.array(p_forest,mask = p_forest == 255)
-        
-        else:
-            import scipy.stats
-            p_forest = np.zeros_like(reference_scene[0].data[:,:,0])
-            for i in range(1,7):
-                from statsmodels.robust.scale import huber
-                try:
-                    mean_robust, std_robust = huber(indices[:,:,0][normalisation_class==i])
-                    z_score = (indices[:,:,0][normalisation_class==i] - mean_robust) / std_robust
-                    
-                except:
-                    z_score = scipy.stats.mstats.zscore(indices[:,:,0][normalisation_class==i])
-                
-                p_forest[normalisation_class==i] = z_score#scipy.special.ndtr()
-                #pdb.set_trace()
-                
-                #from sklearn.covariance import MinCovDet
-                #X = indices[normalisation_class==i]
-                #robust_cov = MinCovDet().fit(X)
-                #robust_mahal = robust_cov.mahalanobis(X - robust_cov.location_) ** (0.33)
-                
-                #from sklearn.neighbors import LocalOutlierFactor
-                #clf = LocalOutlierFactor(n_neighbors=20)
-                #y_pred = clf.fit_predict(X)
-            
-            p_forest = np.ma.array(p_forest,mask = np.logical_or(normalisation_class==0, indices[:,:,0].mask))
-                    
+        p_forest = classify(indices, scene.image_type)
+        p_forest = np.ma.array(p_forest,mask = p_forest == 255)                   
         
         this_output_name = getOutputName(scene, output_dir = output_dir, output_name = output_name)
         
         # Save data to disk
-        #ds = _createGdalDataset(scene.metadata, data_out = p_forest, filename = this_output_name, nodata = 255, driver='GTiff', dtype = gdal.GDT_Byte, options=['COMPRESS=LZW'])
-        ds = _createGdalDataset(scene.metadata, data_out = p_forest.data, filename = this_output_name, driver='GTiff', dtype = gdal.GDT_Float32, options=['COMPRESS=LZW'])
+        ds = _createGdalDataset(md_dest, data_out = p_forest.data, filename = this_output_name, driver='GTiff', dtype = gdal.GDT_Float32, options=['COMPRESS=LZW'])
+
+
 
 if __name__ == '__main__':
     '''
