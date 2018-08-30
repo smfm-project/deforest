@@ -11,6 +11,11 @@ import os
 from osgeo import gdal
 import scipy.ndimage
 
+import skimage.filters.rank
+from skimage.morphology import disk
+import skimage.exposure
+
+
 import sys
 sys.path.insert(0, '/exports/csce/datastore/geos/users/sbowers3/sen2mosaic')
 sys.path.insert(0, '/exports/csce/datastore/geos/users/sbowers3/sen1mosaic')
@@ -22,7 +27,7 @@ import pdb
 
 
 
-def loadS1Single(scene, md_dest, polarisation = 'VV'):
+def loadS1Single(scene, md = None, polarisation = 'VV', normalisation_type = 'NONE', reference_scene = None):
     """
     Extract backscatter data given .dim file and polarisation
     
@@ -33,18 +38,21 @@ def loadS1Single(scene, md_dest, polarisation = 'VV'):
     Returns:
         A maked numpy array of backscatter.
     """
+        
+    mask = scene.getMask(md = md)
+    indices = scene.getBand(polarisation, md = md)
     
-    mask = scene.getMask(md = md_dest)
-    data = scene.getBand(polarisation, md = md_dest)
+    # Turn into a masked array
+    indices = np.ma.array(indices, mask = mask)
     
-    # Normalise
-    #if normalise:
-    #    wdata = normalise(data, scene.metadata, normalisation_type = scene.normalisation_type, normalisation_percentile = scene.normalisation_percentile, normalisation_area = scene.normalisation_area)
+    # Normalise data
+    if normalisation_type != 'NONE':
+        indices = normalise(indices, md = md, normalisation_type = normalisation_type, reference_scene = reference_scene)
     
-    return data
+    return indices
 
 
-def loadS1Dual(scene, md_dest):
+def loadS1Dual(scene, md = None, normalisation_type = 'NONE', reference_scene = None):
     """
     Extract backscatter metrics from a dual-polarised Sentinel-1 image.
     
@@ -56,24 +64,23 @@ def loadS1Dual(scene, md_dest):
     """
     
     assert scene.image_type == 'S1dual', "input file %s does not appear to be a dual polarised Sentinel-1 file"%dim_file
-        
-    VV = loadS1Single(scene.filename, md_dest, polarisation = 'VV')
     
-    VH = loadS1Single(scene.filename, md_dest, polarisation = 'VH')
+    VV = loadS1Single(scene, md = md, polarisation = 'VV')
+    
+    VH = loadS1Single(scene, md = md, polarisation = 'VH')
     
     VV_VH = VH - VV # Proportional difference, logarithmic
     
-    data = np.ma.vstack((VV, VH, VV_VH))
+    indices = np.ma.dstack((VV, VH, VV_VH))
     
-    #data = normalise(data, scene.metadata, normalisation_type = scene.normalisation_type, normalisation_percentile = scene.normalisation_percentile, normalisation_area = scene.normalisation_area)
-    
-    return data
+    # Normalise data
+    if normalisation_type != 'NONE':
+        indices = normalise(indices, md = md, normalisation_type = normalisation_type, reference_scene = reference_scene)
+        
+    return indices
 
 
-
-
-
-def loadS2(scene, md_dest):
+def loadS2(scene, md = None, normalisation_type = 'NONE', reference_scene = None):
     """
     Calculate a range of vegetation indices given .SAFE file and resolution.
     
@@ -84,25 +91,27 @@ def loadS2(scene, md_dest):
         A maked numpy array of vegetation indices.
     """
        
-    mask = scene.getMask(correct = True, md = md_dest)
+    mask = scene.getMask(correct = True, md = md)
     
     # Convert mask to a boolean array, allowing only values of 4 (vegetation), 5 (bare sois), and 6 (water)
     mask = np.logical_or(mask < 4, mask > 6)
     
+    # To do: getBand down/upscaling
+        
     # Load the data (as masked numpy array)
-    blue = scene.getBand('B02', md = md_dest)[mask == False] / 10000.
-    green = scene.getBand('B03', md = md_dest)[mask == False] / 10000.
-    red = scene.getBand('B04', md = md_dest)[mask == False] / 10000.
-    swir1 = scene.getBand('B11', md = md_dest)[mask == False] / 10000.
-    swir2 = scene.getBand('B12', md = md_dest)[mask == False] / 10000.
+    blue = scene.getBand('B02', md = md)[mask == False] / 10000.
+    green = scene.getBand('B03', md = md)[mask == False] / 10000.
+    red = scene.getBand('B04', md = md)[mask == False] / 10000.
+    swir1 = scene.getBand('B11', md = md)[mask == False] / 10000.
+    swir2 = scene.getBand('B12', md = md)[mask == False] / 10000.
     
     if scene.resolution == 10:
-        nir = scene.getBand('B08', md = md_dest)[mask == False] / 10000.
+        nir = scene.getBand('B08', md = md)[mask == False] / 10000.
     else:
-        nir = scene.getBand('B8A', md = md_dest)[mask == False] / 10000.
+        nir = scene.getBand('B8A', md = md)[mask == False] / 10000.
        
     # Calculate vegetation indices from Shultz 2016
-    indices = np.zeros((mask.shape[0], mask.shape[1], 5), dtype = np.float32)
+    indices = np.zeros((mask.shape[0], mask.shape[1], 6), dtype = np.float32)
     
     # Don't report div0 errors
     with np.errstate(divide='ignore'):
@@ -123,6 +132,9 @@ def loadS2(scene, md_dest):
         # SAVI
         indices[:,:,4][mask == False] = (1 + 0.5) * ((nir - red) / (nir + red + 0.5))
         
+        # NBR
+        indices[:,:,5][mask == False] = (nir - swir2) / (nir + swir2)
+        
         # TC wetness
         #indices[:,:,5][mask == False] = 0.0315 * blue + 0.2021 * green + 0.3102 * red + 0.1594 * nir - 0.6806 * swir1 - 0.6109 * swir2
         
@@ -131,12 +143,34 @@ def loadS2(scene, md_dest):
         
         # Turn into a masked array
         indices = np.ma.array(indices, mask = np.repeat(np.expand_dims(mask,2), indices.shape[-1], axis=2))
-        
+    
     # Normalise data
-    #indices = normalise(indices, scene.metadata, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile, normalisation_area = normalisation_area, reference_scene = reference_scene)
+    if normalisation_type != 'NONE':
+        indices = normalise(indices, md = md, normalisation_type = normalisation_type, reference_scene = reference_scene)
     
     return indices
 
+
+def loadIndices(scene, md = None, normalisation_type = 'NONE', reference_scene = None, force_S1single = False):
+    '''
+    Load indices from a Sentinel-1 or Sentinel-2 utilities.LoadScene() object.
+    
+    Args:
+        scene: 
+        md_dest:
+        force_S1single: Force the loading of only a single band from Sentinel-1, even where dual polarised
+    Returns:
+        A numpy array
+    '''
+    
+    if scene.image_type == 'S2':
+        indices = loadS2(scene, md = md, normalisation_type = normalisation_type, reference_scene = reference_scene)
+    elif scene.image_type == 'S1dual' and force_S1single == False:
+        indices = loadS1Dual(scene, md = md, normalisation_type = normalisation_type, reference_scene = reference_scene)
+    else:
+        indices = loadS1Single(scene, md = md, normalisation_type = normalisation_type, reference_scene = reference_scene)
+    
+    return indices
 
 
 def _createGdalDataset(md, data_out = None, filename = '', driver = 'MEM', dtype = 3, RasterCount = 1, nodata = None, options = []):
@@ -184,13 +218,13 @@ def _createGdalDataset(md, data_out = None, filename = '', driver = 'MEM', dtype
     return ds
                 
 
-def normalise(data, md, normalisation_type = 'none', normalisation_percentile = 95, normalisation_area = 200000., reference_scene = None):
+def normalise(data, md, normalisation_type = 'none', normalisation_percentile = 95., normalisation_radius = 10000., reference_scene = None):
     '''
     Normalises an array by dividing pixels by the 95th percentile value in the vicinity of each pixel
     
     Args:
         data: A masked numpy array containing the data
-        md: metadata dictionary
+        md: Object from metadata class
         normalisation_type: Select one of 'none' (no normalisation), 'global' (subtract percentile of entire scene), or 'local' (subtract percentile from the area surrounding each pixel).
         percentile: Data percentile to subtract, if normalisation_type == 'local' or 'global'. Defaults to 95%.
         area: Area in m^2 to determine the kernel size if normalisation_type == 'local'. This should be greater than the size of expected deforestation events. Defaults to 200,000 m^2 (20 ha).
@@ -204,10 +238,12 @@ def normalise(data, md, normalisation_type = 'none', normalisation_percentile = 
     
     if normalisation_type == 'match':
         assert reference_scene is not None, "A matching scene must be specified if using match for image normalisation."
-        
+    
     # Takes care of case where only a 2d array is input, allowing us to loop through the third axis
     if data.ndim == 2:
-        data = np.ma.expand_dims(data,2)
+        data = np.ma.expand_dims(data, 2)
+    if reference_scene is not None and reference_scene.ndim == 2:
+        reference_scene = np.ma.expand_dims(reference_scene, 2)
         
     # No normalisation        
     data_percentile = np.zeros_like(data)
@@ -216,24 +252,57 @@ def normalise(data, md, normalisation_type = 'none', normalisation_percentile = 
     if normalisation_type == 'local':
                 
         data_percentile = np.zeros_like(data)
+        #newmax = np.zeros_like(data)
+        #newmin = np.zeros_like(data)
         
         for feature in range(data.shape[2]):
-        
+            
+            data_min = np.min(data[:,:,feature])
+            data_max = np.max(data[:,:,feature])
+            
             # Fill in data gaps with nearest valid pixel (percentile_filter doesn't understand masked arrays)
             ind = scipy.ndimage.distance_transform_edt(data.mask[:,:,feature], return_distances = False, return_indices = True)
-            data_percentile[:,:,feature] = data.data[:,:,feature][tuple(ind)]
-        
+            
+            this_data = data.data[:,:,feature][tuple(ind)]
+            
             # Calculate filter size
-            res = md['res']
-            filter_size = int(round((float(area) / (res ** 2)) ** 0.5,0))
+            filter_size = int(round((float(normalisation_radius) / md.res),0))
+            
+            # Speedier?
+            data_rescaled = (((this_data - data_min) / (data_max - data_min)) * 65535).astype(np.uint16)
+            
+            #data_rescaled = skimage.exposure.equalize_adapthist(data_rescaled, kernel_size = (filter_size, filter_size), clip_limit = 0.0075) * 65535 #0.01
+            data_rescaled = skimage.exposure.equalize_adapthist(data_rescaled, clip_limit = 0.5) * 65535 #0.01
+            
+            data_percentile[:,:,feature] = ((data_rescaled * (data_max - data_min)) / 65535.) + data_min
+            
+            #data_rescaled_high = skimage.filters.rank.percentile(data_rescaled, disk((filter_size - 1)/2), p0  = normalisation_percentile/100.)
+            
+            #newmax[:,:,feature] = ((data_rescaled_high * (data_max - data_min)) / 255.) + data_min
+            
+            #data_rescaled_low = skimage.filters.rank.percentile(data_rescaled, disk((filter_size - 1)/2), p0  = 1. - (normalisation_percentile/100.))
+            
+            #newmin[:,:,feature] = ((data_rescaled_low * (data_max - data_min)) / 255.) + data_min
+
             
             # Filter by percentile
-            data_percentile[:,:,feature] = scipy.ndimage.filters.percentile_filter(data_percentile[:,:,feature], normalisation_percentile, size = (filter_size, filter_size))
+            #data_percentile[:,:,feature] = scipy.ndimage.filters.percentile_filter(data_percentile[:,:,feature], normalisation_percentile, size = (filter_size, filter_size))
+            
+            #data_percentile[:,:,feature] = scipy.ndimage.filters.percentile_filter(data_percentile[:,:,feature], 95., size = (filter_size, filter_size)) - scipy.ndimage.filters.percentile_filter(data_percentile[:,:,feature], 5., size = (filter_size, filter_size))
+            
+            #newmax[:,:,feature] = scipy.ndimage.filters.percentile_filter(data_percentile[:,:,feature], 95., size = (filter_size, filter_size))
+            #newmin[:,:,feature] =  scipy.ndimage.filters.percentile_filter(data_percentile[:,:,feature], 5., size = (filter_size, filter_size))
+            
+            #newmax[:,:,feature] = np.percentile(data[:,:,feature], 95.)
+            #newmin[:,:,feature] = np.percentile(data[:,:,feature], 5.)
+            
             
             # Replace the mask
             data_percentile[:,:,feature] = np.ma.array(data_percentile[:,:,feature], mask = data.mask[:,:,feature])
+            #newmax[:,:,feature] = np.ma.array(newmax[:,:,feature], mask = data.mask[:,:,feature])
+            #newmin[:,:,feature] = np.ma.array(newmin[:,:,feature], mask = data.mask[:,:,feature])
             
-         
+            
     # Following Reiche et al. 2018
     if normalisation_type == 'global':
         
@@ -283,10 +352,12 @@ def normalise(data, md, normalisation_type = 'none', normalisation_percentile = 
         
     # Get rid of residual dimensions where 2d array was input
     data = np.squeeze(data)
-    data_percentile = np.squeeze(data_percentile)
+    #data_percentile = np.squeeze(data_percentile)
         
     # And subtract the seasonal effect from the array
-    data_normalised = data - data_percentile
+    #data_normalised = data - data_percentile
+    #data_normalised = (data - newmin) / (newmax - newmin)
+    data_normalised = data_percentile
     
     return data_normalised
 
@@ -357,100 +428,155 @@ def classify(data, image_type, nodata = 255):
     
     coefs, means, scales = loadCoefficients(image_type)
     
-    p_forest = np.sum(coefs[1:] * _rescaleData(data, means, scales), axis = 2) + coefs[0]
+    data = _rescaleData(data, means, scales)
+    
+    if data.ndim == 2:
+        data = np.ma.expand_dims(data, 2)
+    
+    p_forest = np.sum(coefs[1:] * data, axis = 2) + coefs[0]
+    
+    p_forest = np.squeeze(p_forest)
     
     # Convert from odds to probability
     p_forest = np.exp(p_forest) / (1 + np.exp(p_forest))
-    
+        
     # Reduce the file size by converting data to integer
     p_forest_out = np.round(p_forest.data * 100 , 0).astype(np.uint8)
     p_forest_out[p_forest.mask] = nodata
     
+    p_forest_out = np.ma.array(p_forest_out,mask = p_forest == 255)   
+    
     return p_forest_out
     
-    
 
-def buildReferenceScenes(source_files, ref_month, md_dest):
+
+
+
+def buildReferenceScenes(source_files, md = None):
+    '''
+    Scan through a set of Sentinel-2 GRANULE files, and locate the most appropriate scene to match each to for each one.
+    '''
+    
+    source_files = np.array(source_files)
+    
+    image_types = np.array([scene.image_type for scene in source_files])
+    datetimes = np.array([scene.datetime for scene in source_files])
+    years = datetimes.astype('datetime64[Y]').astype(int) + 1970
+    months = datetimes.astype('datetime64[M]').astype(int) % 12 + 1
+    
+    composite = {}
+    for im_type in ['S1single', 'S1dual', 'S2']:
+        composite[im_type] = {}
+        
+        for year in range(years.min(), years.max() + 1):
+            composite[im_type][str(year)] = {}
+                        
+            for scene in source_files[np.logical_and(image_types == im_type, years == year)]:
+                
+                if np.logical_or(scene.datetime.month < 6, scene.datetime.month > 9 + 1):
+                    continue
+                
+                print scene.filename       
+                
+                indices = loadIndices(scene, md = md)
+                
+                if 'count' not in locals():
+                    count = np.zeros((md.nrows, md.ncols), dtype = np.int8)
+                    total = np.zeros((md.nrows, md.ncols, 1 if indices.ndim ==2 else indices.shape[-1]), dtype = np.float32)
+                    
+                mask = scene.getMask(md = md)
+                
+                count[mask == False] += 1
+                
+                try:
+                    total[mask[:,:,np.newaxis] == False] += indices[:,:,np.newaxis][mask[:,:,np.newaxis] == False]
+                except:
+                    total[np.broadcast_to(mask[:,:,np.newaxis],indices.shape) == False] += indices[np.broadcast_to(mask[:,:,np.newaxis],indices.shape) == False]
+            
+            # If year had any data
+            if 'count' in locals():
+                
+                total = np.ma.array(total, mask = np.broadcast_to(count[:,:,np.newaxis], total.shape) == 0)
+                total.data[total.mask== False] = (total.data / np.broadcast_to(count[:,:,np.newaxis], total.shape))[total.mask== False]
+                
+                composite[scene.image_type][str(scene.datetime.year)] = np.squeeze(total)
+                # Reset composite image
+                del count
+                del total
+    
+    return composite
+
+"""
+def buildReferenceScenes(source_files, ref_month, md = None):
     '''
     Scan through a set of Sentinel-2 GRANULE files, and locate the most appropriate scene to match each to for each one.
     '''
     
     assert ref_month in range(1,13), "Normalisation month must be between 1 and 12."
-    
-    datetimes = []
-    
     source_files = np.array(source_files)
     
-    for scene in source_files:
-        datetimes.append(scene.datetime)
-    
-    datetimes = np.array(datetimes)
-    
+    image_types = np.array([scene.image_type for scene in source_files])
+    datetimes = np.array([scene.datetime for scene in source_files])
     years = datetimes.astype('datetime64[Y]').astype(int) + 1970
     months = datetimes.astype('datetime64[M]').astype(int) % 12 + 1
     
-    masked = 1
-    this_month = 1
-    
     out = []
     im_date = []
+    im_type = []
     
+    pdb.set_trace()
     for year in np.unique(years):
         
-        for n, scene in enumerate(source_files[years == year]):
+        for image_type in np.unique(image_types[years == year]):
+                          
+            for n, scene in enumerate(source_files[np.logical_and(years == year, image_types == image_type)]):
                    
-            this_month = months[years == year][n]
-            
-            if np.logical_or(this_month < ref_month, this_month > ref_month + 1):
-                continue
-            
-            print scene.filename
-            
-            if scene.image_type == 'S1single':
-                indices = loadS1Single(scene, md_dest)
-            elif scene.image_type == 'S1dual':
-                indices = loadS1Dual(scene, md_dest)
-            elif scene.image_type == 'S2':
-                indices = loadS2(scene, md_dest)
-            else:
-                raise IOError
-                        
-            if 'composite' not in locals():
-                composite = indices
-                im_date.append(scene.datetime)
+                this_month = months[years == year][n]
                 
-            else:
+                if np.logical_or(this_month < ref_month, this_month > ref_month + 1):
+                    continue
                 
-                sel = np.logical_and(composite.mask, indices.mask==False)
+                print scene.filename
                 
-                composite[sel] = indices[sel]
-            
-            # Re-calculate maked pixels
-            masked = float(composite.mask.sum()) / ((composite.mask==False).sum() + composite.mask.sum())
-            
-            # After 1 month data, quit if enough data present, or continue for another month until enough data
-            # Break if two months passed
-            if this_month > ref_month + 1:
-                break
-            if this_month == ref_month + 1 and masked > 0.75:
-                break
+                indices = loadIndices(scene, md = md)
                 
-        # If year had any data
-        if 'composite' in locals():
-            out.append(composite)
-        
-            # Reset composite image
-            del composite
+                if 'composite' not in locals():
+                    composite = indices
+                    im_type.append(image_type)
+                    im_date.append(scene.datetime)
+                    
+                else:
+                    
+                    sel = np.logical_and(composite.mask, indices.mask==False)
+                    composite[sel] = indices[sel]
+                
+                # Re-calculate proportion of masked pixels
+                masked = float(composite.mask.sum()) / ((composite.mask==False).sum() + composite.mask.sum())
+                
+                # After 1 month data, quit if enough data present, or continue for another month until enough data
+                # Break if two months passed
+                if this_month > ref_month + 1:
+                    break
+                if this_month == ref_month + 1 and masked > 0.75:
+                    break
+                    
+            # If year had any data
+            if 'composite' in locals():
+                out.append(composite)
+                
+                # Reset composite image
+                del composite
       
-    # Determine which composite image should be used by each infile
-    inds = np.zeros_like(source_files, dtype=np.int)
+    # Determine which composite image should be used by each source_file
+    inds = np.zeros_like(source_files, dtype=np.int) + 999
     
     # Use most recently measured composite (or upcoming if month not yet passed)
-    for n, date in enumerate(im_date):
-        inds[datetimes >= date] = n
+    for image_n, this_date, this_type in zip(range(len(im_date)),im_date,im_type):
+        
+        inds[np.logical_and(np.logical_or(datetimes >= this_date, inds == 999), image_types == this_type)] = image_n
     
     return out, inds
-
+"""
     
 def findMatch2(source_files, ref_month):
     '''
@@ -532,14 +658,52 @@ def getOutputName(scene, output_dir = os.getcwd(), output_name = 'classified'):
     return output_name
 
 
-def getS2Res(resolution):
+
+def loadScenes(source_files, md = None, sort = True):
     '''
+    Load and sort input scenes (Sentinel-1 or Sentinel-2).
+    
+    Args:
+        source_files: 
+        md: 
+        sort: Set True to sort files by date
+    
+    Returns: 
+        A list of scenes of class utilitiesLoadScene()
     '''
     
-    if resolution < 60:
-        return 20
-    else:
-        return 60
+    def getS2Res(resolution):
+        '''
+        '''
+        
+        if float(resolution) < 60:
+            return 20
+        else:
+            return 60
+    
+    # Load scenes
+    scenes = []
+    for source_file in source_files:
+        try:
+            scenes.append(sen2mosaic.utilities.LoadScene(source_file, resolution = getS2Res(md.res)))
+        except AssertionError:
+            continue
+        except IOError:
+            try:
+                scenes.append(sen1mosaic.utilities.LoadScene(source_file))
+            except:
+                print 'WARNING: Failed to load scene: %s'%source_file.filename
+                continue
+    
+    if md is not None:
+        # Remove scenes that aren't within output extent
+        scenes = sen2mosaic.utilities.getSourceFilesInTile(scenes, md)
+    
+    # Sort by date
+    if sort:
+        scenes = [scene for _,scene in sorted(zip([s.datetime.date() for s in scenes],scenes))]
+    
+    return scenes
     
 
 def main(source_files, target_extent, resolution, EPSG_code, output_dir = os.getcwd(), output_name = 'classified'):
@@ -551,43 +715,23 @@ def main(source_files, target_extent, resolution, EPSG_code, output_dir = os.get
     # Determine output extent and projection
     md_dest = sen2mosaic.utilities.Metadata(target_extent, resolution, EPSG_code)
     
-    # Load scenes
-    scenes = []
-    for source_file in source_files:
-        try:
-            scenes.append(sen2mosaic.utilities.LoadScene(source_file, resolution = getS2Res(resolution)))
-        except AssertionError:
-            continue
-        except IOError:
-            try:
-                scenes.append(sen1mosaic.utilities.LoadScene(source_file))
-            except:
-                continue
-    
-    # Remove scenes that aren't within output extent
-    scenes = sen2mosaic.utilities.getSourceFilesInTile(scenes, md_dest)
-    
-    # Sort by date
-    scenes = [scene for _,scene in sorted(zip([s.datetime.date() for s in scenes],scenes))]
-    
+    # Load and sort input scenes
+    scenes = loadScenes(source_files, md = md_dest, sort = True)
+            
     # Build reference scenes
-    reference_scene, inds = buildReferenceScenes(scenes, 7, md_dest)
-    
+    #reference_scenes, inds = buildReferenceScenes(scenes, 7, md = md_dest)
     
     for n, scene in enumerate(scenes):
         print 'Doing %s'%scene.filename.split('/')[-1]
         
-        indices = loadS2(scene, md_dest)
+        # Load data
+        indices = loadIndices(scene, md = md_dest, normalisation_type = 'local')#, reference_scene = reference_scenes[inds[n]])
         
-        indices = normalise(indices, md_dest, normalisation_type = 'match', reference_scene = reference_scene[inds[n]])
-        
+        # Classify to probability of forest
         p_forest = classify(indices, scene.image_type)
-        p_forest = np.ma.array(p_forest,mask = p_forest == 255)                   
         
-        this_output_name = getOutputName(scene, output_dir = output_dir, output_name = output_name)
-        
-        # Save data to disk
-        ds = _createGdalDataset(md_dest, data_out = p_forest.data, filename = this_output_name, driver='GTiff', dtype = gdal.GDT_Float32, options=['COMPRESS=LZW'])
+         # Save data to disk
+        ds = sen2mosaic.utilities.createGdalDataset(md_dest, data_out = p_forest.data, filename = getOutputName(scene, output_dir = output_dir, output_name = output_name), driver='GTiff', dtype = gdal.GDT_Byte, options=['COMPRESS=LZW'])
 
 
 
@@ -596,7 +740,7 @@ if __name__ == '__main__':
     '''
     
     # Set up command line parser
-    parser = argparse.ArgumentParser(description = "Process Sentinel-1 and Sentinel-2 to match a predefined CRS, and perform a deseasaonalisation operation to reduce the impact of seasonality on relfectance/backscsatter.")
+    parser = argparse.ArgumentParser(description = "Process Sentinel-1 and Sentinel-2 to match a predefined CRS, perform a deseasaonalisation operation to reduce the impact of seasonality on reflectance/backscsatter, and output forest probability images.")
     
     parser._action_groups.pop()
     required = parser.add_argument_group('required arguments')
@@ -615,7 +759,7 @@ if __name__ == '__main__':
     # Get arguments
     args = parser.parse_args()
     
-    # Get absolute path of input .safe files.
+    # Get absolute path of input files.
     infiles = [os.path.abspath(i) for i in args.infiles]
     
     # Find files from input directory/granule etc.
@@ -624,3 +768,5 @@ if __name__ == '__main__':
     
     # Execute script
     main(infiles_S2 + infiles_S1, args.target_extent, args.resolution, args.epsg, output_dir = args.output_dir, output_name = args.output_name)
+    
+    #~/anaconda2/bin/python ~/DATA/deforest/deforest/classify.py ../chimanimani/L2_files/S1 -r 60 -e 32736 -te 499980 7790200 609780 7900000 -n S1_test

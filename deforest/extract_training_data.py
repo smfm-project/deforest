@@ -2,7 +2,6 @@
 # It works by importing functions from classify.py, and outputting a config file to inform classify.py
 
 import argparse
-import classify
 import csv
 import datetime as dt
 import matplotlib.pyplot as plt
@@ -14,11 +13,13 @@ from sklearn.linear_model import LogisticRegression
 
 import sys
 sys.path.insert(0, '/exports/csce/datastore/geos/users/sbowers3/sen2mosaic')
+sys.path.insert(0, '/exports/csce/datastore/geos/users/sbowers3/sen1mosaic')
 
+import sen1mosaic.utilities
 import sen2mosaic.utilities
+import classify
 
 import pdb
-
 
 
 def getFilesOfType(infiles, image_type):
@@ -191,6 +192,29 @@ def rasterizeShapefile(shp, landcover, md):
     return mask
 
 
+
+def getPixels(indices, mask, subset = 5000):
+    '''
+    '''
+        
+    if indices.ndim == 2:
+        indices = np.ma.expand_dims(indices, 2)
+        
+    sub = np.logical_and(mask, np.sum(indices.mask,axis=2)==0)
+    indices_subset = indices[sub].data
+    sub = np.zeros(indices_subset.shape[0], dtype = np.bool)
+    sub[:subset] = True
+    np.random.shuffle(sub)
+    
+    data_out = np.squeeze(indices_subset[sub,:]).tolist()
+    
+    if np.unique(np.array([len(i) for i in data_out])).shape[0] > 1:
+        print '    Unexpected number of dimensions, skipping'
+        data_out = []
+    
+    return data_out
+
+
 def outputData(forest_px, nonforest_px, image_type, output_dir = os.getcwd()):
     """
     Save data to a .npz file for analysis in model fitting script.
@@ -201,13 +225,74 @@ def outputData(forest_px, nonforest_px, image_type, output_dir = os.getcwd()):
         image_type: String to represent image type (e.g. S1single, S1dual, S2)
         output_dir: Directory to output .npz file. Defaults to current working directory.
     """
-
+    
     forest_px = np.array(forest_px)
     nonforest_px = np.array(nonforest_px)
     
     np.savez('%s/%s_training_data.npz'%(output_dir, image_type), forest_px = forest_px, nonforest_px = nonforest_px) 
 
 
+
+
+def main(source_files, shp, target_extent, resolution, EPSG_code, output_dir = os.getcwd()):
+    """
+    """
+    
+    from osgeo import gdal
+    
+    # Determine output extent and projection
+    md_dest = sen2mosaic.utilities.Metadata(target_extent, resolution, EPSG_code)
+    
+    # Load and sort input scenes
+    scenes = classify.loadScenes(source_files, md = md_dest, sort = True)
+    
+    # Build reference scenes
+    # reference_scenes = classify.buildReferenceScenes(scenes, md = md_dest)
+    
+    #forest_px, forest_image_type, nonforest_px, nonforest_image_type = [], [], [], []
+    px = {}
+    for x in ['forest','nonforest']:
+        px[x] = {}
+        for y in ['S1single','S1dual','S2']:
+            px[x][y] = []
+    
+    for n, scene in enumerate(scenes):
+        print 'Doing %s'%scene.filename.split('/')[-1]
+        
+        # Load data
+        try:
+            indices = classify.loadIndices(scene, md = md_dest, normalisation_type = 'local')#, reference_scene = reference_scenes[scene.image_type][str(scene.datetime.year)])
+        except:
+            print '    Error loading file, skipping...'
+            continue
+        
+        forest_mask = rasterizeShapefile(shp, 'forest', md_dest)
+        nonforest_mask = rasterizeShapefile(shp, 'nonforest', md_dest)
+        
+        forest = getPixels(indices, forest_mask)
+        nonforest = getPixels(indices, nonforest_mask)
+        
+        # Rarely, a list of len==1 is returned, this catches that eventuality to avoid messing up array.
+        #if indices.ndim == 2:
+        #    expected_len = 1
+        #else:
+        #    expected_len = indices.shape[-1]
+        
+        #if len(forest) == expected_len and len(nonforest) == expected_len:
+        px['forest'][scene.image_type] += forest
+        px['nonforest'][scene.image_type] += nonforest
+        #else:
+        #    pdb.set_trace()
+        #    print '    Unexpected number of dimensions, skipping...'
+        
+        try:
+            # Output data (as we go)
+            outputData(px['forest'][scene.image_type], px['nonforest'][scene.image_type], scene.image_type, output_dir = output_dir)
+        except:
+            pdb.set_trace()
+
+
+'''
 def main(source_files, shp, normalisation_type = 'none', normalisation_percentile = 95, normalisation_area = 200000, output_dir = os.getcwd()):
     """
     """
@@ -288,7 +373,7 @@ def main(source_files, shp, normalisation_type = 'none', normalisation_percentil
         
         # Output data (as we go)
         outputData(forest_px, nonforest_px, 'S2', output_dir = output_dir)
-
+'''
 
 if __name__ == '__main__':
     
@@ -303,22 +388,26 @@ if __name__ == '__main__':
     # Required arguments
     required.add_argument('-s', '--shapefile', metavar = 'SHP', type = str, help = 'Path to training data shapefile.')
     #required.add_argument('-t', '--image_type', metavar = 'TYPE', type = str, help = 'Image type to train (S1single, S1dual, or S2')
+    required.add_argument('-te', '--target_extent', nargs = 4, metavar = ('XMIN', 'YMIN', 'XMAX', 'YMAX'), type = float, help = "Extent of output image tile, in format <xmin, ymin, xmax, ymax>.")
+    required.add_argument('-e', '--epsg', type=int, help="EPSG code for output image tile CRS. This must be UTM. Find the EPSG code of your output CRS as https://www.epsg-registry.org/.")
+    optional.add_argument('-res', '--resolution', metavar = 'N', type=int, help="Specify a resolution to output.")
     
     # Optional arguments
-    optional.add_argument('infiles', metavar = 'L2A_FILES', type = str, default = [os.getcwd()], nargs = '*', help = 'Sentinel 2 input files (level 2A) in .SAFE format. Specify one or more valid Sentinel-2 .SAFE, a directory containing .SAFE files, or multiple granules through wildcards (e.g. *.SAFE/GRANULE/*). Defaults to processing all granules in current working directory.')
-    optional.add_argument('-nt', '--normalisation_type', type=str, metavar = 'STR', default = 'none', help="Normalisation type. Set to one of 'none', 'local', 'global', or 'match'. Defaults to 'none'.")
-    optional.add_argument('-np', '--normalisation_percentile', type=int, metavar = 'N', default = 95, help="Normalisation percentile, in case where normalisation type set to  'local' or 'global'. Defaults to 95 percent.")
-    optional.add_argument('-na', '--normalisation_area', type=float, metavar = 'N', default = 200000., help="Normalisation area. Defaults to 200000 m^2.")
-    optional.add_argument('-o', '--output_dir', type=str, metavar = 'PATH', default = os.getcwd(), help="Directory to output training data.")
-
+    optional.add_argument('infiles', metavar = 'FILES', type = str, default = [os.getcwd()], nargs = '*', help = 'Sentinel 2 input files (level 2A) in .SAFE format, Sentinel-1 input files in .dim format, or a mixture. Specify one or more valid Sentinel-2 .SAFE, a directory containing .SAFE files, or multiple granules through wildcards (e.g. *.SAFE/GRANULE/*). Defaults to processing all granules in current working directory.')
+    optional.add_argument('-o', '--output_dir', type=str, metavar = 'DIR', default = os.getcwd(), help="Optionally specify an output directory")
+    optional.add_argument('-n', '--output_name', type=str, metavar = 'NAME', default = 'CLASSIFIED', help="Optionally specify a string to precede output filename.")
+    
     # Get arguments
     args = parser.parse_args()
-
+    
     # Get absolute path of input .safe files.
     infiles = [os.path.abspath(i) for i in args.infiles]
     
     # Find files from input directory/granule etc.
-    infiles = sen2mosaic.utilities.prepInfiles(infiles, '2A')
+    infiles_S2 = sen2mosaic.utilities.prepInfiles(infiles, '2A')
+    infiles_S1 = sen1mosaic.utilities.prepInfiles(infiles)
     
     # Execute script
-    main(infiles, args.shapefile, normalisation_type = args.normalisation_type, normalisation_percentile = args.normalisation_percentile, output_dir = args.output_dir)
+    main(infiles_S2 + infiles_S1, args.shapefile, args.target_extent, args.resolution, args.epsg, output_dir = args.output_dir)
+    
+    # /anaconda2/bin/python ~/DATA/deforest/deforest/extract_training_data.py ../chimanimani/L2_files/S2/ -r 60 -e 32736 -te 450000 7790200 550000 7900000 -s /home/sbowers3/SMFM/chimanimani/training_areas/training_areas.shp
