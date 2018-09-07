@@ -14,6 +14,7 @@ from sklearn.linear_model import LogisticRegression
 import sys
 sys.path.insert(0, '/exports/csce/datastore/geos/users/sbowers3/sen2mosaic')
 sys.path.insert(0, '/exports/csce/datastore/geos/users/sbowers3/sen1mosaic')
+sys.path.insert(0, '/exports/csce/datastore/geos/users/sbowers3/deforest/deforest')
 
 import sen1mosaic.utilities
 import sen2mosaic.utilities
@@ -233,8 +234,47 @@ def outputData(forest_px, nonforest_px, image_type, output_dir = os.getcwd()):
 
 
 
+def _extractData(input_list):
+    '''
+    '''
+    
+    source_file = input_list[0]
+    training_data = input_list[1]
+    target_extent = input_list[2]
+    resolution = input_list[3]
+    EPSG_code = input_list[4]
+    
+    forest_key = [1]
+    nonforest_key = [2, 3, 4, 7]
+    
+    print 'Doing %s'%source_file
 
-def main(source_files, shp, target_extent, resolution, EPSG_code, output_dir = os.getcwd()):
+    # Determine output extent and projection
+    md_dest = sen2mosaic.utilities.Metadata(target_extent, resolution, EPSG_code)
+        
+    # Load and sort input scenes
+    scene = classify.loadScenes([source_file], md = md_dest)[0]
+    indices = classify.loadIndices(scene, md = md_dest)
+    
+    if training_data.split('.')[-1] == 'shp':
+        forest_mask = rasterizeShapefile(training_data, 'forest', md_dest)
+        nonforest_mask = rasterizeShapefile(training_data, 'nonforest', md_dest)
+        
+    elif training_data.split('.')[-1] == 'tif' or training_data.split('.')[-1] == 'tiff':
+        landcover = classify.loadLandcover(training_data, md_dest)
+            
+        forest_mask = np.in1d(landcover, np.array(forest_key)).reshape(landcover.shape)
+        nonforest_mask = np.in1d(landcover, np.array(nonforest_key)).reshape(landcover.shape)
+
+    
+    forest = getPixels(indices, forest_mask)
+    nonforest = getPixels(indices, nonforest_mask)
+    
+    return [forest, nonforest]
+
+   
+
+def main(source_files, training_data, target_extent, resolution, EPSG_code, output_dir = os.getcwd()):
     """
     """
     
@@ -244,10 +284,14 @@ def main(source_files, shp, target_extent, resolution, EPSG_code, output_dir = o
     md_dest = sen2mosaic.utilities.Metadata(target_extent, resolution, EPSG_code)
     
     # Load and sort input scenes
-    scenes = classify.loadScenes(source_files, md = md_dest, sort = True)
+    scenes = classify.loadScenes(source_files[::2], md = md_dest, sort = True)
     
-    # Build reference scenes
-    # reference_scenes = classify.buildReferenceScenes(scenes, md = md_dest)
+    import multiprocessing
+        
+    # Get pixel values
+    instances = multiprocessing.Pool(30)
+    pixel_values = instances.map(_extractData, [[scene.filename, training_data, target_extent, resolution, EPSG_code] for scene in scenes])
+    instances.close()
     
     #forest_px, forest_image_type, nonforest_px, nonforest_image_type = [], [], [], []
     px = {}
@@ -256,124 +300,13 @@ def main(source_files, shp, target_extent, resolution, EPSG_code, output_dir = o
         for y in ['S1single','S1dual','S2']:
             px[x][y] = []
     
-    for n, scene in enumerate(scenes):
-        print 'Doing %s'%scene.filename.split('/')[-1]
+    for scene, pixels in zip(scenes,pixel_values):
+        px['forest'][scene.image_type] += pixels[0]
+        px['nonforest'][scene.image_type] += pixels[1]
         
-        # Load data
-        try:
-            indices = classify.loadIndices(scene, md = md_dest, normalisation_type = 'local')#, reference_scene = reference_scenes[scene.image_type][str(scene.datetime.year)])
-        except:
-            print '    Error loading file, skipping...'
-            continue
-        
-        forest_mask = rasterizeShapefile(shp, 'forest', md_dest)
-        nonforest_mask = rasterizeShapefile(shp, 'nonforest', md_dest)
-        
-        forest = getPixels(indices, forest_mask)
-        nonforest = getPixels(indices, nonforest_mask)
-        
-        # Rarely, a list of len==1 is returned, this catches that eventuality to avoid messing up array.
-        #if indices.ndim == 2:
-        #    expected_len = 1
-        #else:
-        #    expected_len = indices.shape[-1]
-        
-        #if len(forest) == expected_len and len(nonforest) == expected_len:
-        px['forest'][scene.image_type] += forest
-        px['nonforest'][scene.image_type] += nonforest
-        #else:
-        #    pdb.set_trace()
-        #    print '    Unexpected number of dimensions, skipping...'
-        
-        try:
-            # Output data (as we go)
-            outputData(px['forest'][scene.image_type], px['nonforest'][scene.image_type], scene.image_type, output_dir = output_dir)
-        except:
-            pdb.set_trace()
-
-
-'''
-def main(source_files, shp, normalisation_type = 'none', normalisation_percentile = 95, normalisation_area = 200000, output_dir = os.getcwd()):
-    """
-    """
+        # This is currently wasteful as a loop, re-write
+        outputData(px['forest'][scene.image_type], px['nonforest'][scene.image_type], scene.image_type, output_dir = output_dir)
     
-    from osgeo import gdal
-    
-    # Slim down input files to only those that fall within shapefile #TODO
-    # md_dest = buildMetadataDictionary(args.target_extent, args.resolution, args.epsg)
-    # infiles = getFilesInTile(args.infiles, md_dest)
-    
-    # Slim down input files to only those of given image type
-    #infiles = getFilesOfType(infiles, image_type)
-    
-    scenes = [sen2mosaic.utilities.LoadScene(source_file, resolution=60) for source_file in source_files]
-    scenes = sen2mosaic.utilities.sortScenes(scenes, by = 'date')
-    
-    forest_px = []
-    nonforest_px = []
-    
-    if normalisation_type == 'match':
-        reference_scene, inds = classify.findMatch(scenes, 7)
-    
-    for n, scene in enumerate(scenes):
-        
-        print 'Reading file %s'%scene.filename.split('/')[-1]
-                
-        # Load scene
-        if normalisation_type == 'match':
-            indices = classify.loadS2(scene, normalisation_type = normalisation_type, reference_scene = reference_scene[inds[n]])
-        
-        else:
-            indices = classify.loadS2(scene, normalisation_type = normalisation_type, normalisation_percentile = normalisation_percentile, normalisation_area = normalisation_area)
-                
-        # Where only one predictor
-        if indices.ndim == 2:
-            indices = indices[:,:,np.newaxis]
-        
-        # Get areas within shapefile
-        forest_mask = rasterizeShapefile(shp, 'forest', scene.metadata)
-        nonforest_mask = rasterizeShapefile(shp, 'nonforest', scene.metadata)
-        
-        ### Landcover mask test
-        # Get forest and nonforest pixels from landcover map
-        #landcover = classify.loadLandcover('/home/sbowers3/SMFM/DATA/landcover/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif', md_source)
-        #pdb.set_trace()
-        # These are the values that represent forest. In the test map, it's only 1.
-        #forest_key = np.array([1])
-        #forest_mask = np.in1d(landcover, forest_key).reshape(landcover.shape)
-        #nonforest_key = np.array([2, 3, 4, 7]) # Those landcovers to which forest could feasible change into
-        #nonforest_mask = np.in1d(landcover, nonforest_key).reshape(landcover.shape)
-        
-        # Get nonforest pixels within 5 pixels of a forest. TODO: specify minimum extent of forest
-        #from scipy import ndimage
-        #nonforest_mask = np.logical_and(nonforest_mask,ndimage.morphology.binary_dilation(forest_mask.astype(np.int), iterations = 5))
-        ####
-        #pdb.set_trace() 
-        # Hack date out of output_filename. TODO: Return date from loadData?
-        #date = output_filename.split('/')[-1].split('.')[0].split('_')[-2]
-        #date = dt.datetime.strptime(date, '%Y%m%d').date()
-        
-        # Extract data for forest training pixels
-        sub = np.logical_and(forest_mask==1, np.sum(indices.mask,axis=2)==0)
-        data_subset = indices[sub].data
-        sub = np.zeros(data_subset.shape[0], dtype = np.bool)
-        sub[:5000] = True
-        np.random.shuffle(sub)
-        
-        forest_px.extend(data_subset[sub,:].tolist())
-                
-        # Extract data for nonforest training pixels
-        sub = np.logical_and(nonforest_mask==1, np.sum(indices.mask,axis=2)==0)
-        data_subset = indices[sub].data
-        sub = np.zeros(data_subset.shape[0], dtype = np.bool)
-        sub[:5000] = True
-        np.random.shuffle(sub)
-        
-        nonforest_px.extend(data_subset[sub,:].tolist())
-        
-        # Output data (as we go)
-        outputData(forest_px, nonforest_px, 'S2', output_dir = output_dir)
-'''
 
 if __name__ == '__main__':
     
@@ -386,7 +319,7 @@ if __name__ == '__main__':
     optional = parser.add_argument_group('optional arguments')
 
     # Required arguments
-    required.add_argument('-s', '--shapefile', metavar = 'SHP', type = str, help = 'Path to training data shapefile.')
+    required.add_argument('-t', '--training_data', metavar = 'SHP/TIF', type = str, help = 'Path to training data geotiff/shapefile.')
     #required.add_argument('-t', '--image_type', metavar = 'TYPE', type = str, help = 'Image type to train (S1single, S1dual, or S2')
     required.add_argument('-te', '--target_extent', nargs = 4, metavar = ('XMIN', 'YMIN', 'XMAX', 'YMAX'), type = float, help = "Extent of output image tile, in format <xmin, ymin, xmax, ymax>.")
     required.add_argument('-e', '--epsg', type=int, help="EPSG code for output image tile CRS. This must be UTM. Find the EPSG code of your output CRS as https://www.epsg-registry.org/.")
@@ -408,6 +341,9 @@ if __name__ == '__main__':
     infiles_S1 = sen1mosaic.utilities.prepInfiles(infiles)
     
     # Execute script
-    main(infiles_S2 + infiles_S1, args.shapefile, args.target_extent, args.resolution, args.epsg, output_dir = args.output_dir)
+    main(infiles_S2 + infiles_S1, args.training_data, args.target_extent, args.resolution, args.epsg, output_dir = args.output_dir)
     
     # /anaconda2/bin/python ~/DATA/deforest/deforest/extract_training_data.py ../chimanimani/L2_files/S2/ -r 60 -e 32736 -te 450000 7790200 550000 7900000 -s /home/sbowers3/SMFM/chimanimani/training_areas/training_areas.shp
+    # ~/anaconda2/bin/python ~/DATA/deforest/deforest/extract_training_data.py ../chimanimani/L2_files/S2/ -r 60 -e 32736 -te 499980 7790200 609780 7900000 -s /home/sbowers3/SMFM/chimanimani/training_areas/training_areas.shp
+    # ~/anaconda2/bin/python ~/DATA/deforest/deforest/extract_training_data.py ../chimanimani/L2_files/S2/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t ~/SMFM/landcover/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif
+    

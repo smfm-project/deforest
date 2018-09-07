@@ -89,6 +89,8 @@ def calculateDeforestation(infiles):
     
     # Get datetimes for each image
     dates = getImageDate(infiles)
+    months = dates.astype('datetime64[M]').astype(int) % 12 + 1
+    dates_include = dates[months<10]
     
     # Get the image_type for each image
     image_type = getImageType(infiles)
@@ -118,9 +120,7 @@ def calculateDeforestation(infiles):
         #TODO find repeat data in Sentinel-2 imagery. This is tricky, as datetimes can be different yet imagery the same in tile overlap.
         
         # One layer per unique image type. This should allow only one overpass per satellite per granule/track. Needs work to accomodate Sentinel-2 tiles
-        
-        #NB: Sentinel-2 currently contributing too much deforestation. Re-calibrate?
-        
+                
         p_forest = np.zeros((YSize, XSize, unique_images.shape[0]), dtype = np.uint8) + 255
             
         for n, this_image_type in enumerate(unique_images):
@@ -136,9 +136,10 @@ def calculateDeforestation(infiles):
                 
                 # Paste the new data into these locations
                 p_forest[:,:,n][s] = data[s]
-                
+        #pdb.set_trace()
         # Change percent probability of forest to probability of non forest
         mask = p_forest == 255
+        
         PNF = (100 - p_forest) / 100.
         PNF[mask] = 0.
         
@@ -146,7 +147,7 @@ def calculateDeforestation(infiles):
         PNF = np.squeeze(PNF)
         mask = np.squeeze(mask)
             
-        ## Apply block weighting/
+        ## Apply block weighting
         PNF[PNF < 0.1] = 0.1
         PNF[PNF > 0.9] = 0.9
         

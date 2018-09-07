@@ -32,18 +32,18 @@ def fitModel(forest_px, nonforest_px, image_type, regularisation_strength = 1., 
     assert regularisation_type == 'l1' or regularisation_type == 'l2', "The parameter regularisation_type must be set to 'l1' or 'l2'."
     
     # Balance data by undersampling the larger class
-    forest_px, nonforest_px = undersampleArray(forest_px, nonforest_px)
+    #forest_px, nonforest_px = undersampleArray(forest_px, nonforest_px)
     
     # Make sample size managable
-    forest_px = forest_px#[::10]
-    nonforest_px = nonforest_px#[::10]
+    forest_px = forest_px[::10]
+    nonforest_px = nonforest_px[::10]
     
     # Prepare data for sklearn
     y = np.array(([1] * forest_px.shape[0]) + ([0] * nonforest_px.shape[0]))
     X = np.vstack((forest_px,nonforest_px))
-    
+    X[np.logical_or(np.isinf(X), np.isnan(X))] = 0.
     #X = np.hstack((X[:,:3],interactions1,interactions2))
-
+    
     
     # Polynomial expansion method (optional). May in some cases improve results, if strong regularisation used.
     #from sklearn.preprocessing import PolynomialFeatures
@@ -52,21 +52,31 @@ def fitModel(forest_px, nonforest_px, image_type, regularisation_strength = 1., 
     
     # Split into training and test datasets
     from sklearn.cross_validation import train_test_split
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.3, random_state = 0)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.5, random_state = 42)
+    
+    X_test1, X_test2, y_test1, y_test2 = train_test_split(X, y, test_size = 0.5, random_state = 42)
     
     # Normalising the training data. This is necessary for l1/l2 regularisation to function properly.
-    from sklearn.preprocessing import StandardScaler
-    sc = StandardScaler()
-    sc.fit(X_train)
-    X_train_std = sc.transform(X_train)
-    X_test_std = sc.transform(X_test)
-    
+    #from sklearn.preprocessing import StandardScaler
+    #sc = StandardScaler()
+    #sc.fit(X_train)
+    #X_train_std = sc.transform(X_train)
+    #X_test_std = sc.transform(X_test)
+        
     # Fit the logistic model. We chose 'l1' regularisation because it hard the property of sparsity, which removes predictors that add little additional information. This is important where features are highly correlated.
     # Parameter C determines the degree of regularisation. This parameter needs to be tuned, such that the model is as simple as it can reasonably be, but no simpler.
      
-    from sklearn.linear_model import LogisticRegression
-    lr = LogisticRegression(C = 0.01, penalty = regularisation_type, class_weight = 'balanced', solver = 'liblinear')
-    lr.fit(X_train_std,y_train)
+    #from sklearn.linear_model import LogisticRegression
+    #clf = LogisticRegression(C = 0.01, penalty = regularisation_type, class_weight = 'balanced', solver = 'liblinear')
+    #clf.fit(X_train,y_train)
+    #pdb.set_trace()
+    from sklearn.ensemble import RandomForestClassifier
+    clf = RandomForestClassifier(random_state = 42, n_estimators = 100, class_weight = 'balanced')
+    clf.fit(X_train, y_train)
+
+    #from sklearn.ensemble import GradientBoostingClassifier
+    #clf = GradientBoostingClassifier(random_state = 42, n_estimators = 1000)
+    #clf.fit(X_train, y_train)
     
     # Tune the hyperparameters
     #from sklearn.grid_search import GridSearchCV
@@ -75,16 +85,18 @@ def fitModel(forest_px, nonforest_px, image_type, regularisation_strength = 1., 
     #clf.fit(X_train, y_train)
     #print clf.best_params_
     
-    # Post-hoc probability calibration. Essential where not using Logistic Regression.
-    #from sklearn.calibration import CalibratedClassifierCV
-    #lr = CalibratedClassifierCV(lr, method="sigmoid", cv="prefit")
-    #lr.fit(X_valid_std, y_valid)
+    # Post-hoc probability calibration. Probably to be recommended where not using logistic regression
+    from sklearn.calibration import CalibratedClassifierCV
+    clf_cal = CalibratedClassifierCV(clf, method="sigmoid", cv="prefit")
+    #X_test1_bal, y_test1_bal = undersampleArray(X_test1, y_test1)
+    clf_cal.fit(X_test1, y_test1)
+    
     # Quality assessment:
     # We strongly recommend you carefully consider the quality of your models. These are the metrics that worked for us, but it's perfeclty possible they'll work poorly in your case. Proceed with caution! 
 
-    if output_QA: buildQAPlot(lr, X_test_std, y_test, image_type, output_dir = output_dir)
-    
-    return lr, sc 
+    if output_QA: buildQAPlot(clf, X_test2, y_test2, image_type, output_dir = output_dir)
+        
+    return clf
 
 
 def undersampleArray(array1, array2):
@@ -159,7 +171,7 @@ def _plotConfusionMatrix(cm, classes,
     plt.xlabel('Predicted label')
 
 
-def buildQAPlot(lr, X_test_std, y_test, image_type, output_dir = _getCfgDir()):
+def buildQAPlot(clf, X_test, y_test, image_type, output_dir = _getCfgDir()):
     '''
     Function to construct a plot with quality assessment metrics for logistic reression fit.
     '''
@@ -176,8 +188,8 @@ def buildQAPlot(lr, X_test_std, y_test, image_type, output_dir = _getCfgDir()):
     
     ax1.plot([0, 1], [0, 1], "b:", label="Perfectly calibrated")
     
-    prob_pos = lr.predict_proba(X_test_std)[:, 1]
-    fpr, tpr, _ = metrics.roc_curve(y_test, lr.predict_proba(X_test_std)[:,1])
+    prob_pos = clf.predict_proba(X_test)[:, 1]
+    fpr, tpr, _ = metrics.roc_curve(y_test, clf.predict_proba(X_test)[:,1])
     
     fraction_of_positives, mean_predicted_value = calibration_curve(y_test, prob_pos, n_bins=10)
     
@@ -198,37 +210,29 @@ def buildQAPlot(lr, X_test_std, y_test, image_type, output_dir = _getCfgDir()):
     ax2.set_xlabel("Mean predicted value")
     ax2.set_ylabel("Count")
     
-    cnf_matrix =  metrics.confusion_matrix(y_test,lr.predict(X_test_std))
+    cnf_matrix =  metrics.confusion_matrix(y_test,clf.predict(X_test))
     ax3 = _plotConfusionMatrix(cnf_matrix, classes=['Forest','Nonforest'], normalize=True)
-    
+       
     plt.tight_layout()
     plt.savefig('%s/%s_quality_assessment.png'%(output_dir,image_type))
 
 
-def saveCoefficients(lr, sc, image_type, output_dir = _getCfgDir()):
+def saveModel(clf, image_type, output_dir = _getCfgDir()):
     '''
     Writes the coefficients from a logistic regression to a csv file in the deforest configuration directory.
     
     Args:
-        lr: A logistic regression object from the sklearn module
-        sc: A standardscaler object from the sklearn module
+        clf: A fitted model from sklearn
         image_type: A string wih the image type (i.e. S1single, S1dual, S2)
         output_dir: Directory to output model coefficients. Defaults to the cfg directory."
     '''
 
     # Determine name of output file
-    filename = '%s/%s_coef.csv'%(output_dir, image_type)
-
-    # Write to csv file
-    with open(filename, 'wb') as csvfile:
-        writer = csv.writer(csvfile, delimiter = ',')
-        writer.writerow(['model_term','value','mean', 'scale'])
-        writer.writerow(['intercept', lr.intercept_[0], 1, 1])
-
-        for layer in range(lr.coef_[0].shape[0]):
-            writer.writerow([layer,lr.coef_[0][layer], sc.mean_[layer], sc.scale_[layer]])
-
-
+    filename = '%s/%s_model.pkl'%(output_dir, image_type)
+    
+    # Pickle
+    from sklearn.externals import joblib
+    file_out = joblib.dump(clf, filename)
 
 
 def main(data, output_dir = _getCfgDir(), regularisation_strength = 1., regularisation_type = 'l1'):
@@ -242,11 +246,11 @@ def main(data, output_dir = _getCfgDir(), regularisation_strength = 1., regulari
     # Get data
     forest_px, nonforest_px = loadData(data)
     
-    # Fit a logistic model
-    lr, sc = fitModel(forest_px, nonforest_px, image_type, regularisation_strength = regularisation_strength, regularisation_type = regularisation_type, output_QA = True, output_dir = output_dir)
+    # Fit an RF model
+    clf = fitModel(forest_px, nonforest_px, image_type, regularisation_strength = regularisation_strength, regularisation_type = regularisation_type, output_QA = True, output_dir = output_dir)
     
     # Save model coefficients
-    saveCoefficients(lr, sc, image_type, output_dir = output_dir)
+    saveModel(clf, image_type, output_dir = output_dir)
     
 
 
