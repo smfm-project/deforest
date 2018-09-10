@@ -7,6 +7,7 @@ import datetime as dt
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+from osgeo import gdal
 from PIL import Image, ImageDraw
 import shapefile
 from sklearn.linear_model import LogisticRegression
@@ -193,6 +194,46 @@ def rasterizeShapefile(shp, landcover, md):
     return mask
 
 
+def loadLandcover(landcover_map, md_dest):
+    '''
+    Load a landcover map, and reproject it to the CRS defined in md.
+    For test purposes only.
+    '''
+    
+    from osgeo import osr
+    
+    # Load landcover map
+    ds_source = gdal.Open(landcover_map,0)
+    geo_t = ds_source.GetGeoTransform()
+    proj = ds_source.GetProjection()
+
+    # Get extent and resolution    
+    nrows = ds_source.RasterXSize
+    ncols = ds_source.RasterYSize
+    ulx = float(geo_t[4])
+    uly = float(geo_t[5])
+    xres = float(geo_t[0])
+    yres = float(geo_t[3])
+    lrx = ulx + (xres * ncols)
+    lry = uly + (yres * nrows)
+    extent = [ulx, lry, lrx, uly]
+    
+    # Get EPSG
+    srs = osr.SpatialReference(wkt = proj)
+    srs.AutoIdentifyEPSG()
+    EPSG = int(srs.GetAttrValue("AUTHORITY", 1))
+    
+    # Add source metadata to a dictionary
+    md_source =sen2mosaic.utilities.Metadata(extent, xres, EPSG)
+    
+    # Build an empty destination dataset
+    ds_dest = sen2mosaic.utilities.createGdalDataset(md_dest,dtype = 1)
+    
+    # And reproject landcover dataset to match input image
+    landcover = sen2mosaic.utilities.reprojectImage(ds_source, ds_dest, md_source, md_dest)
+    
+    return np.squeeze(landcover)
+    
 
 def getPixels(indices, mask, subset = 5000):
     '''
@@ -261,7 +302,7 @@ def _extractData(input_list):
         nonforest_mask = rasterizeShapefile(training_data, 'nonforest', md_dest)
         
     elif training_data.split('.')[-1] == 'tif' or training_data.split('.')[-1] == 'tiff':
-        landcover = classify.loadLandcover(training_data, md_dest)
+        landcover = loadLandcover(training_data, md_dest)
             
         forest_mask = np.in1d(landcover, np.array(forest_key)).reshape(landcover.shape)
         nonforest_mask = np.in1d(landcover, np.array(nonforest_key)).reshape(landcover.shape)
@@ -277,9 +318,7 @@ def _extractData(input_list):
 def main(source_files, training_data, target_extent, resolution, EPSG_code, output_dir = os.getcwd()):
     """
     """
-    
-    from osgeo import gdal
-    
+        
     # Determine output extent and projection
     md_dest = sen2mosaic.utilities.Metadata(target_extent, resolution, EPSG_code)
     
@@ -289,7 +328,7 @@ def main(source_files, training_data, target_extent, resolution, EPSG_code, outp
     import multiprocessing
         
     # Get pixel values
-    instances = multiprocessing.Pool(30)
+    instances = multiprocessing.Pool(20)
     pixel_values = instances.map(_extractData, [[scene.filename, training_data, target_extent, resolution, EPSG_code] for scene in scenes])
     instances.close()
     
@@ -304,8 +343,8 @@ def main(source_files, training_data, target_extent, resolution, EPSG_code, outp
         px['forest'][scene.image_type] += pixels[0]
         px['nonforest'][scene.image_type] += pixels[1]
         
-        # This is currently wasteful as a loop, re-write
-        outputData(px['forest'][scene.image_type], px['nonforest'][scene.image_type], scene.image_type, output_dir = output_dir)
+    # This currently only outputs S2
+    outputData(px['forest'][scene.image_type], px['nonforest']['S2'], 'S2', output_dir = output_dir)
     
 
 if __name__ == '__main__':

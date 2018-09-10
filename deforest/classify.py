@@ -30,46 +30,7 @@ global X # Feature array
 global clf # Model
 
 
-def loadLandcover(landcover_map, md_dest):
-    '''
-    Load a landcover map, and reproject it to the CRS defined in md.
-    For test purposes only.
-    '''
-    
-    from osgeo import osr
-    
-    # Load landcover map
-    ds_source = gdal.Open(landcover_map,0)
-    geo_t = ds_source.GetGeoTransform()
-    proj = ds_source.GetProjection()
 
-    # Get extent and resolution    
-    nrows = ds_source.RasterXSize
-    ncols = ds_source.RasterYSize
-    ulx = float(geo_t[4])
-    uly = float(geo_t[5])
-    xres = float(geo_t[0])
-    yres = float(geo_t[3])
-    lrx = ulx + (xres * ncols)
-    lry = uly + (yres * nrows)
-    extent = [ulx, lry, lrx, uly]
-    
-    # Get EPSG
-    srs = osr.SpatialReference(wkt = proj)
-    srs.AutoIdentifyEPSG()
-    EPSG = int(srs.GetAttrValue("AUTHORITY", 1))
-    
-    # Add source metadata to a dictionary
-    md_source =sen2mosaic.utilities.Metadata(extent, xres, EPSG)
-    
-    # Build an empty destination dataset
-    ds_dest = sen2mosaic.utilities.createGdalDataset(md_dest,dtype = 1)
-    
-    # And reproject landcover dataset to match input image
-    landcover = sen2mosaic.utilities.reprojectImage(ds_source, ds_dest, md_source, md_dest)
-    
-    return np.squeeze(landcover)
-    
     
 
 def loadS1Single(scene, md = None, polarisation = 'VV', normalisation_type = 'NONE', reference_scene = None):
@@ -151,6 +112,18 @@ def adapthist(im, md, radius = 4800, clip_limit = 0.75):
     return im
     
     
+
+def mean_filter(im, window_size = 3):
+    '''
+    '''
+
+    from scipy import signal
+
+    border = window_size / 2
+    
+    im_filt = signal.convolve2d(im, np.ones((window_size, window_size)) / (window_size ** 2), boundary = 'symm')
+    
+    return im_filt[border:-border, border:-border]
     
     
 def stdev_filter(im, window_size = 3):
@@ -158,18 +131,14 @@ def stdev_filter(im, window_size = 3):
     Based on https://stackoverflow.com/questions/18419871/improving-code-efficiency-standard-deviation-on-sliding-windows
     and http://nickc1.github.io/python,/matlab/2016/05/17/Standard-Deviation-(Filters)-in-Matlab-and-Python.html
     '''
-
-    from scipy import signal
-
-    c1 = signal.convolve2d(im, np.ones((window_size, window_size)) / (window_size ** 2), boundary = 'symm')
-    c2 = signal.convolve2d(im*im, np.ones((window_size, window_size)) / (window_size ** 2), boundary = 'symm')
-
-    border = window_size / 2
-
+    
+    c1 = mean_filter(im, window_size = window_size)
+    c2 = mean_filter(im * im, window_size = window_size)
+    
     variance = c2 - c1 * c1
     variance[variance < 0] += 0.0001 # Prevents divide by zero errors.
 
-    return np.ma.array(np.sqrt(variance)[border:-border, border:-border], mask = im.mask)
+    return np.ma.array(np.sqrt(variance), mask = im.mask)
 
 
 def build_percentile_image(im, md, percentile = 95., radius = 1200):
@@ -177,10 +146,10 @@ def build_percentile_image(im, md, percentile = 95., radius = 1200):
     This approximates the operation of a percentile filter, by downsampling blocks and interpolating across the image. A percetnile file operates far too slowly to be practical.
     
     Args:
-        im:
-        md:
-        percentile:
-        radius:
+        im: masked numpy array
+        md: Metadata()
+        percentile: Percentile to extact for each pixel
+        radius: Search radius to calculate block size
         
     Returns:
         
@@ -207,7 +176,7 @@ def build_percentile_image(im, md, percentile = 95., radius = 1200):
     
     # Calculate percentile of blocks
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
+        warnings.simplefilter("ignore", RuntimeWarning) # nanpercentile throws warnings where all values are nan. These are safe to ignore
         im_percentile = np.nanpercentile(im_downsampled, percentile, axis = 2)
     
     # Fill in data gaps with nearest valid pixel so as not to upset interpolation
@@ -227,13 +196,13 @@ def build_percentile_image(im, md, percentile = 95., radius = 1200):
 
 def loadS2(scene, md = None, normalisation_type = 'none', reference_scene = None):
     """
-    Calculate a range of vegetation indices given .SAFE file and resolution.
+    Calculate a range of vegetation features given .SAFE file and resolution.
     
     Args:
         scene: 
     
     Returns:
-        A maked numpy array of vegetation indices.
+        A maked numpy array of vegetation features.
     """
        
     mask = scene.getMask(correct = True, md = md)
@@ -245,7 +214,6 @@ def loadS2(scene, md = None, normalisation_type = 'none', reference_scene = None
         
     # Load the data (as masked numpy array)
     B02 = scene.getBand('B02', md = md)[mask == False] / 10000.
-    #B03 = scene.getBand('B03', md = md)[mask == False] / 10000.
     B04 = scene.getBand('B04', md = md)[mask == False] / 10000.
     B11 = scene.getBand('B11', md = md)[mask == False] / 10000.
     B12 = scene.getBand('B12', md = md)[mask == False] / 10000.
@@ -259,65 +227,75 @@ def loadS2(scene, md = None, normalisation_type = 'none', reference_scene = None
     B05 = scene.getBand('B05', md = md)[mask == False] / 10000.
     B06 = scene.getBand('B06', md = md)[mask == False] / 10000.
     
-    # Calculate vegetation indices from Shultz 2016
-    indices = np.zeros((mask.shape[0], mask.shape[1], 16), dtype = np.float32)
+
+    features = np.zeros((mask.shape[0], mask.shape[1], 20), dtype = np.float32)
     
     # Don't report div0 errors
     with np.errstate(divide = 'ignore', invalid = 'ignore'):
         
+        # Calculate a series of vegetation indices (based on Shultz 2016)
+        
         # NDVI
-        indices[:,:,0][mask == False] = (B08 - B04) / (B08 + B04)
+        features[:,:,0][mask == False] = (B08 - B04) / (B08 + B04)
         
         # EVI
-        indices[:,:,1][mask == False] = ((B08 - B04) / (B08 + 6 * B04 - 7.5 * B02 + 1)) * 2.5
+        features[:,:,1][mask == False] = ((B08 - B04) / (B08 + 6 * B04 - 7.5 * B02 + 1)) * 2.5
         
         # GEMI
         n = (2 * (B08 ** 2 - B04 ** 2) + 1.5 * B08 + 0.5 * B04) / (B08 + B04 + 0.5)
-        indices[:,:,2][mask == False] = (n * (1 - 0.25 * n)) - ((B04 - 0.125) / (1 - B04))
+        features[:,:,2][mask == False] = (n * (1 - 0.25 * n)) - ((B04 - 0.125) / (1 - B04))
         
         # NDMI
-        indices[:,:,3][mask == False] = (B08 - B11) / (B08 + B11)
+        features[:,:,3][mask == False] = (B08 - B11) / (B08 + B11)
         
         # SAVI
-        indices[:,:,4][mask == False] = (1 + 0.5) * ((B08 - B04) / (B08 + B04 + 0.5))
+        features[:,:,4][mask == False] = (1 + 0.5) * ((B08 - B04) / (B08 + B04 + 0.5))
 
         # RENDVI
-        indices[:,:,5][mask == False] = (B06 - B05) / (B05 + B06) #(2 * B01)
+        features[:,:,5][mask == False] = (B06 - B05) / (B05 + B06) #(2 * B01)
         
         # SIPI
-        indices[:,:,6][mask == False] = (B08 - B01) / (B08 - B04) 
+        features[:,:,6][mask == False] = (B08 - B01) / (B08 - B04) 
         
         # NBR
-        indices[:,:,7][mask == False] = (B08 - B12) / (B08 + B12)
+        features[:,:,7][mask == False] = (B08 - B12) / (B08 + B12)
         
         # MIRBI
-        indices[:,:,8][mask == False] = (10 * B12) - (9.8 * B11) + 2
+        features[:,:,8][mask == False] = (10 * B12) - (9.8 * B11) + 2
         
         # Get rid of inifite values etc.
-        indices[np.logical_or(np.isinf(indices), np.isnan(indices))] = 0.
+        features[np.logical_or(np.isinf(features), np.isnan(features))] = 0.
         
         # Turn into a masked array
-        indices = np.ma.array(indices, mask = np.repeat(np.expand_dims(mask,2), indices.shape[-1], axis=2))
+        features = np.ma.array(features, mask = np.repeat(np.expand_dims(mask,2), features.shape[-1], axis=2))
     
     # Hamunyela et al. functions
-    indices[:,:,9] = indices[:,:,0] / build_percentile_image(indices[:,:,0], md, radius = 1200)
-
-    indices[:,:,10] = indices[:,:,0] / build_percentile_image(indices[:,:,6], md, radius = 2400)
-
-    indices[:,:,11] = indices[:,:,0] / build_percentile_image(indices[:,:,0], md, radius = 4800)
+    features[:,:,9]  = features[:,:,0] / build_percentile_image(features[:,:,0], md, radius = 1200)
+    features[:,:,10] = features[:,:,0] / build_percentile_image(features[:,:,0], md, radius = 2400)
+    features[:,:,11] = features[:,:,0] / build_percentile_image(features[:,:,0], md, radius = 4800)
+    features[:,:,12] = features[:,:,0] / build_percentile_image(features[:,:,0], md, radius = 9600)
     
     # CLAHE
-    indices[:,:,12] = adapthist(indices[:,:,0], md, radius = 2400, clip_limit = 0.75)
-    indices[:,:,13] = adapthist(indices[:,:,0], md, radius = 4800, clip_limit = 0.75)
+    features[:,:,13] = adapthist(features[:,:,0], md, radius = 2400, clip_limit = 0.75)
+    features[:,:,14] = adapthist(features[:,:,0], md, radius = 4800, clip_limit = 0.75)
 
     # Texture
-    indices[:,:,14] = stdev_filter(indices[:,:,0], window_size = 3)
-    indices[:,:,15] = stdev_filter(indices[:,:,0], window_size = 9)
-        
-    # Tidy up residual nodata values
-    indices[np.logical_or(np.isinf(indices), np.isnan(indices))] = 0.
+    features[:,:,15] = stdev_filter(features[:,:,0], window_size = 3)
+    features[:,:,16] = stdev_filter(features[:,:,0], window_size = 9)
     
-    return indices
+    # Coefficient of variation (seasonality??)
+    features[:,:,17] = features[:,:,16] / mean_filter(features[:,:,16], window_size = 9)
+    
+    # Spring/Autumn
+    features[:,:,18] = np.zeros_like(features[:,:,0]) + np.sin(((scene.datetime.date() - datetime.date(scene.datetime.year,1,1)).days / 365.) * 2 * np.pi)
+    
+    # Winter/Summer
+    features[:,:,19] = np.zeros_like(features[:,:,0]) + np.cos(((scene.datetime.date() - datetime.date(scene.datetime.year,1,1)).days / 365.) * 2 * np.pi)
+    
+    # Tidy up residual nodata values
+    features[np.logical_or(np.isinf(features), np.isnan(features))] = 0.
+    
+    return features
 
 
 def loadIndices(scene, md = None, normalisation_type = 'none', reference_scene = None, force_S1single = False):
@@ -559,10 +537,13 @@ def _classify_all(input_list):
     md_dest = sen2mosaic.utilities.Metadata(target_extent, resolution, EPSG_code)
     scene = loadScenes([source_file], md = md_dest, sort = True)[0]
     
-    print 'Doing %s'%scene.filename
+    try:
+        print 'Doing %s'%scene.filename
+        indices = loadIndices(scene, md = md_dest, normalisation_type = 'local')
+    except:
+        print 'Error loading %s'%scene.filename
+        return 0.
     
-    indices = loadIndices(scene, md = md_dest, normalisation_type = 'local')
-        
     p_forest = classify(indices, scene.image_type)
     
     # Save data to disk
@@ -578,7 +559,7 @@ def main(source_files, target_extent, resolution, EPSG_code, output_dir = os.get
     md_dest = sen2mosaic.utilities.Metadata(target_extent, resolution, EPSG_code)
     scenes = loadScenes(source_files, md = md_dest, sort = True)
        
-    _classify_all([[scene.filename, target_extent, resolution, EPSG_code, output_dir, output_name] for scene in scenes][0])
+    #_classify_all([[scene.filename, target_extent, resolution, EPSG_code, output_dir, output_name] for scene in scenes][0])
     
     instances = multiprocessing.Pool(25)
     p_forest = instances.map(_classify_all, [[scene.filename, target_extent, resolution, EPSG_code, output_dir, output_name] for scene in scenes])

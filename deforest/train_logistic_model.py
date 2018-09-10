@@ -42,40 +42,18 @@ def fitModel(forest_px, nonforest_px, image_type, regularisation_strength = 1., 
     y = np.array(([1] * forest_px.shape[0]) + ([0] * nonforest_px.shape[0]))
     X = np.vstack((forest_px,nonforest_px))
     X[np.logical_or(np.isinf(X), np.isnan(X))] = 0.
-    #X = np.hstack((X[:,:3],interactions1,interactions2))
-    
-    
-    # Polynomial expansion method (optional). May in some cases improve results, if strong regularisation used.
-    #from sklearn.preprocessing import PolynomialFeatures
-    #poly = PolynomialFeatures(3)
-    #X = poly.fit_transform(X)
     
     # Split into training and test datasets
     from sklearn.cross_validation import train_test_split
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.5, random_state = 42)
-    
     X_test1, X_test2, y_test1, y_test2 = train_test_split(X, y, test_size = 0.5, random_state = 42)
     
-    # Normalising the training data. This is necessary for l1/l2 regularisation to function properly.
-    #from sklearn.preprocessing import StandardScaler
-    #sc = StandardScaler()
-    #sc.fit(X_train)
-    #X_train_std = sc.transform(X_train)
-    #X_test_std = sc.transform(X_test)
-        
-    # Fit the logistic model. We chose 'l1' regularisation because it hard the property of sparsity, which removes predictors that add little additional information. This is important where features are highly correlated.
-    # Parameter C determines the degree of regularisation. This parameter needs to be tuned, such that the model is as simple as it can reasonably be, but no simpler.
-     
-    #from sklearn.linear_model import LogisticRegression
-    #clf = LogisticRegression(C = 0.01, penalty = regularisation_type, class_weight = 'balanced', solver = 'liblinear')
-    #clf.fit(X_train,y_train)
-    #pdb.set_trace()
     from sklearn.ensemble import RandomForestClassifier
     clf = RandomForestClassifier(random_state = 42, n_estimators = 100, class_weight = 'balanced')
     clf.fit(X_train, y_train)
 
     #from sklearn.ensemble import GradientBoostingClassifier
-    #clf = GradientBoostingClassifier(random_state = 42, n_estimators = 1000)
+    #clf = GradientBoostingClassifier(random_state = 42, n_estimators = 100)
     #clf.fit(X_train, y_train)
     
     # Tune the hyperparameters
@@ -212,7 +190,7 @@ def buildQAPlot(clf, X_test, y_test, image_type, output_dir = _getCfgDir()):
     
     cnf_matrix =  metrics.confusion_matrix(y_test,clf.predict(X_test))
     ax3 = _plotConfusionMatrix(cnf_matrix, classes=['Forest','Nonforest'], normalize=True)
-       
+    import pdb; pdb.set_trace()
     plt.tight_layout()
     plt.savefig('%s/%s_quality_assessment.png'%(output_dir,image_type))
 
@@ -281,3 +259,5 @@ if __name__ == '__main__':
     
     # Execute script
     main(args.data, output_dir = args.output_dir, regularisation_strength = args.regularisation_strength, regularisation_type = args.regularisation_type)
+    
+    #~/anaconda2/bin/python ~/DATA/deforest/deforest/train_logistic_model.py -o ./ S2_training_data.npz
