@@ -466,5 +466,5 @@ if __name__ == '__main__':
     main(infiles, args.target_extent, args.resolution, args.epsg, args.training_data, args.forest_values, args.nonforest_values, attribute_name = args.attribute_name, n_processes = args.n_processes, max_pixels = args.max_pixels, output_dir = args.output_dir, output_name = args.output_name)
     
     # Example:
-    # ~/anaconda2/bin/python ~/DATA/deforest/deforest/extract_training_data.py ../chimanimani/L2_files/S2/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t ~/SMFM/landcover/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -o ./ -mi 100 -p 20 -f 1 -nf 2 3 4 5 6 7 8 10
+    # ~/anaconda2/bin/python ~/DATA/deforest/deforest/extract_training_data.py ../chimanimani/L2_files/S2/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t ~/SMFM/landcover/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -o ./ --max_images 100 -p 20 -f 1 -nf 2 3 4 5 6 7 8 10
     
