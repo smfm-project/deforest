@@ -21,7 +21,7 @@ import classify
 import pdb
 
 
-def loadShapefile(shp, md_dest, attribute = '', attribute_value = ''):
+def loadShapefile(shp, md_dest, attribute = '', attribute_values = ''):
     """
     Rasterize polygons from a shapefile to match a specified CRS.
         
@@ -29,15 +29,18 @@ def loadShapefile(shp, md_dest, attribute = '', attribute_value = ''):
         shp: Path to a shapefile consisting of points, lines and/or polygons. This does not have to be in the same projection as ds.
         md_dest: A metadata file from sen2mosaic.utilities.Metadata().
         attribute: Attribute name to include as part of mask. Defaults to all. If specifying an attribute, you must also specify an attribute_value.
-        attribute_value: Attribute value (from attribute 'attribute_name') to include in the mask. Defaults to all. If specifying an attribute_value, you must also specify an attribute.
+        attribute_values: Attribute value or list of values (from attribute 'attribute_name') to include in the mask. Defaults to all values. If specifying an attribute_value, you must also specify an attribute.
         
     Returns:
         A numpy array with a boolean mask delineating locations inside (True) and outside (False) the shapefile given attribute and attribute_value.
     """
     
-    if attribute != '' or attribute_value != '':
-        assert attribute != '' and attribute_value != '', "Both  `attribute` and `attribute_value` must be specified."
-        
+    if attribute != '' or attribute_values != '':
+        assert attribute != '' and attribute_values != '', "Both  `attribute` and `attribute_value` must be specified."
+    
+    # Allow input of one or more attribute values
+    if type(attribute_values) == str: attribute_values = [attribute_values]
+    
     from PIL import Image, ImageDraw
     from osgeo import gdalnumeric
     
@@ -114,7 +117,7 @@ def loadShapefile(shp, md_dest, attribute = '', attribute_value = ''):
         
         atr = dict(zip(field_names, r.record))
         
-        if attribute_value != '' and atr[attribute] != attribute_value:
+        if attribute_value != '' and atr[attribute] not in attribute_values:
             continue
         
         shape = r.shape
@@ -294,13 +297,16 @@ def _extractData(input_list):
     target_extent = input_list[2]
     resolution = input_list[3]
     EPSG_code = input_list[4]
-    subset = input_list[5]
+    forest_values = input_list[5]
+    nonforest_values = input_list[6]
+    attribute_name = input_list[7]
+    subset = input_list[8]
     
     # Load input scene
     md_dest = sen2mosaic.utilities.Metadata(target_extent, resolution, EPSG_code)
     scene = classify.loadScenes([source_file], md = md_dest)
        
-    return extractData(scene, training_data, md_dest, subset = subset)
+    return extractData(scene, training_data, md_dest, forest_values, nonforest_values, attribute_name = attribute_name, subset = subset)
 
 
 def _unpackOutputs(outputs):
@@ -323,7 +329,7 @@ def _unpackOutputs(outputs):
     return forest_px, nonforest_px
     
 
-def extractData(scenes, training_data, md_dest, subset = 5000):
+def extractData(scenes, training_data, md_dest, forest_values, nonforest_values, attribute_name = '', subset = 5000):
     '''
     Extract pixel values from a list of scenes.
     
@@ -331,15 +337,14 @@ def extractData(scenes, training_data, md_dest, subset = 5000):
         scenes: A list of scenes of type classify.loadScenes()
         training_data: A GeoTiff, .vrt of .shp file containing training pixels/polygons.
         md_dest: A metadata file from sen2mosaic.utilities.Metadata().
+        forest_values: A list of raster classes (integers) or shapefile attribute values (str) indicating forest in training_data.
+        nonforest_values: A list of raster classes (integers) or shapefile attribute values (str) indicating nonforest in training_data.
         subset: Maximum number of pixels to extract for each class from each image
     
     Returns:
         A tuple with (a list of forest pixel values, a list of nonforest pixel values)
     '''
-       
-    forest_key = [1]
-    nonforest_key = [2, 3, 4, 7]
-    
+        
     forest, nonforest = [], []
     
     for scene in scenes:
@@ -353,12 +358,12 @@ def extractData(scenes, training_data, md_dest, subset = 5000):
             print 'Missing data, continuing'
         
         if training_data.split('.')[-1] == 'shp':
-            forest_mask = loadShapefile(training_data, md_dest, attribute = 'landcover', attribute_value = 'forest')
-            nonforest_mask = loadShapefile(training_data, md_dest, attribute = 'landcover', attribute_value = 'nonforest')
+            forest_mask = loadShapefile(training_data, md_dest, attribute = attribute_name, attribute_value = forest_values)
+            nonforest_mask = loadShapefile(training_data, md_dest, attribute = attribute_name, attribute_value = nonforest_values)
             
         elif training_data.split('.')[-1] in ['tif', 'tiff', 'vrt']:
-            forest_mask = loadRaster(training_data, md_dest, forest_key)
-            nonforest_mask = loadRaster(training_data, md_dest, nonforest_key)
+            forest_mask = loadRaster(training_data, md_dest, forest_values)
+            nonforest_mask = loadRaster(training_data, md_dest, nonforest_values)
         
         # Get random subset of pixels
         forest.append(_getPixels(indices, forest_mask, subset = subset))
@@ -367,17 +372,20 @@ def extractData(scenes, training_data, md_dest, subset = 5000):
     return forest, nonforest
 
 
-def main(source_files, training_data, target_extent, resolution, EPSG_code, n_processes = 1, max_pixels = 5000, output_dir = os.getcwd(), output_name = 'S2'):
+def main(source_files, target_extent, resolution, EPSG_code, training_data, forest_values, nonforest_values, attribute_name = '', n_processes = 1, max_pixels = 5000, output_dir = os.getcwd(), output_name = 'S2'):
     '''main(source_files, training_data, target_extent, resolution, EPSG_code, n_processes = 1, max_pixels = 5000, output_dir = os.getcwd(), output_name = 'S2')
     
     Extract pixel values from source_files and output as a np.savez() file. This is the function that is initiated from the command line.
     
     Args:
         source_files: A list of directories for Sentinel-2 input tiles. 
-        training_data: A GeoTiff, .vrt of .shp file containing training pixels/polygons.
         target_extent: Extent of search area, in format [xmin, ymin, xmax, ymax]
         resolution: Resolution to re-sample search area, in meters. Best to be 10 m, 20 m or 60 m to match Sentinel-2 resolution.
         EPSG_code: EPSG code of search area.
+        training_data: A GeoTiff, .vrt of .shp file containing training pixels/polygons.
+        forest_values: A list of raster classes (integers) or shapefile attribute values (str) indicating forest in training_data.
+        nonforest_values: A list of raster classes (integers) or shapefile attribute values (str) indicating nonforest in training_data.
+        attribute_name: Shapefile attribute under which forest_values and nonforest_values can be found
         n_processes: Number of processes, defaults to 1.
         max_pixels: Maximum number of pixels to extract for each class from each image. Defaults to 5000.
         output_dir: Directory to output classifier predictors. Defaults to current working directory.
@@ -393,12 +401,12 @@ def main(source_files, training_data, target_extent, resolution, EPSG_code, n_pr
     
     # Extract pixel values
     if n_processes == 1:
-        forest_px, nonforest_px = extractData(scenes, training_data, md_dest, subset = max_pixels)
+        forest_px, nonforest_px = extractData(scenes, training_data, md_dest, forest_values, nonforest_values, attribute_name = attribute_name, subset = max_pixels)
     
     # Extract pixels by multi-processing
     else:
         instances = multiprocessing.Pool(n_processes)
-        forest_px, nonforest_px = _unpackOutputs(instances.map(_extractData, [[scene.filename, training_data, target_extent, resolution, EPSG_code, max_pixels] for scene in scenes]))
+        forest_px, nonforest_px = _unpackOutputs(instances.map(_extractData, [[scene.filename, training_data, target_extent, resolution, EPSG_code, forest_values, nonforest_values, attribute_name, max_pixels] for scene in scenes]))
         instances.close()
         
     # Output data (currently only outputs S2)
@@ -421,13 +429,16 @@ if __name__ == '__main__':
     required.add_argument('-e', '--epsg', type=int, help="EPSG code for output image tile CRS. This must be UTM. Find the EPSG code of your output CRS as https://www.epsg-registry.org/.")
     required.add_argument('-res', '--resolution', metavar = 'N', type=int, help = "Specify a resolution to output.")
     required.add_argument('-t', '--training_data', metavar = 'SHP/TIF', type = str, help = 'Path to training data geotiff/shapefile.')
-        
+    required.add_argument('-f', '--forest_values', metavar = 'VALS', type = str, nargs = '*', help = 'Values indicating forest in the training GeoTiff or shapefile')
+    required.add_argument('-nf', '--nonforest_values', metavar = 'VALS', type = str, nargs = '*', help = 'Values indicating nonforest in the training GeoTiff or shapefile')
+    
     # Optional arguments
     optional.add_argument('infiles', metavar = 'FILES', type = str, default = [os.getcwd()], nargs = '*', help = 'Sentinel 2 input files (level 2A) in .SAFE format. Specify one or more valid Sentinel-2 .SAFE, a directory containing .SAFE files, multiple tiles through wildcards (e.g. *.SAFE/GRANULE/*), or a text file listing files. Defaults to processing all tiles in current working directory.')
-    optional.add_argument('-p', '--n_processes', type = int, metavar = 'N', default = 1, help = "Specify a maximum number of tiles to process in paralell. Bear in mind that more processes will require more memory. Defaults to 1.")
-    optional.add_argument('-mi', '--max_images', type = int, metavar = 'N', default = 0, help = "Specify a maximum number of input tiles to extract data from. Defaults to all valid tiles.")
-    optional.add_argument('-mp', '--max_pixels', type = int, metavar = 'N', default = 5000, help = "Specify a maximum number of pixels to extract from each image per class. Defaults to 5000.")
-    optional.add_argument('-o', '--output_dir', type=str, metavar = 'DIR', default = os.getcwd(), help="Specify an output directory. Defaults to current working directory.")
+    optional.add_argument('-a', '--attribute_name', metavar = 'NAME', type = str, default = '', help = 'Shapefile attribute name to search for training data polygons. Defaults to all polygons. Required where inputting a shapefile as training_data.')
+    optional.add_argument('-p', '--n_processes', type = int, metavar = 'N', default = 1, help = "Maximum number of tiles to process in paralell. Bear in mind that more processes will require more memory. Defaults to 1.")
+    optional.add_argument('-mi', '--max_images', type = int, metavar = 'N', default = 0, help = "Maximum number of input tiles to extract data from. Defaults to all valid tiles.")
+    optional.add_argument('-mp', '--max_pixels', type = int, metavar = 'N', default = 5000, help = "Maximum number of pixels to extract from each image per class. Defaults to 5000.")
+    optional.add_argument('-o', '--output_dir', type=str, metavar = 'DIR', default = os.getcwd(), help="Output directory. Defaults to current working directory.")
     optional.add_argument('-n', '--output_name', type=str, metavar = 'NAME', default = 'S2', help="Specify a string to precede output filename. Defaults to 'S2'.")
     
     # Get arguments
@@ -440,13 +451,20 @@ if __name__ == '__main__':
     infiles = sen2mosaic.utilities.prepInfiles(infiles, '2A')
     #infiles_S1 = sen1mosaic.utilities.prepInfiles(infiles)
     
+    assert len(infiles) > 0, "No valid input files found at specified location."
+    
     # Reduce number of inputs to max_images
     if args.max_images > 0 and len(infiles) > args.max_images:
         infiles =  [infiles[i] for i in sorted(random.sample(range(len(infiles)), args.max_images))]
     
+    # Format training data values
+    if args.training_data.split('.')[-1] in ['tiff', 'tif', 'vrt']:
+        args.forest_values = [int(v) for v in args.forest_values]
+        args.nonforest_values = [int(v) for v in args.nonforest_values]
+    
     # Execute script
-    main(infiles, args.training_data, args.target_extent, args.resolution, args.epsg, n_processes = args.n_processes, max_pixels = args.max_pixels, output_dir = args.output_dir, output_name = args.output_name)
+    main(infiles, args.target_extent, args.resolution, args.epsg, args.training_data, args.forest_values, args.nonforest_values, attribute_name = args.attribute_name, n_processes = args.n_processes, max_pixels = args.max_pixels, output_dir = args.output_dir, output_name = args.output_name)
     
     # Example:
-    # ~/anaconda2/bin/python ~/DATA/deforest/deforest/extract_training_data.py ../chimanimani/L2_files/S2/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t ~/SMFM/landcover/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -o ./ -mi 100 -p 20
+    # ~/anaconda2/bin/python ~/DATA/deforest/deforest/extract_training_data.py ../chimanimani/L2_files/S2/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t ~/SMFM/landcover/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -o ./ -mi 100 -p 20 -f 1 -nf 2 3 4 5 6 7 8 10
     
