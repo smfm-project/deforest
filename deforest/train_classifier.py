@@ -4,7 +4,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 
+from sklearn.cross_validation import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.externals import joblib
+
 import pdb
+
 
 def _getCfgDir():
     '''
@@ -14,75 +19,14 @@ def _getCfgDir():
     return '/'.join(os.path.dirname(os.path.realpath(__file__)).split('/')[:-1]) + '/cfg/'
 
 
-def loadData(data):
-    '''
-    '''
-    
-    data = np.load(data)
-    forest_px = data['forest_px']
-    nonforest_px = data['nonforest_px']
-    
-    return forest_px, nonforest_px
-
-
-def fitModel(forest_px, nonforest_px, image_type, regularisation_strength = 1., regularisation_type = 'l1', output_QA = True, output_dir = _getCfgDir()):
-    '''
-    '''
-    
-    assert regularisation_type == 'l1' or regularisation_type == 'l2', "The parameter regularisation_type must be set to 'l1' or 'l2'."
-    
-    # Balance data by undersampling the larger class
-    #forest_px, nonforest_px = undersampleArray(forest_px, nonforest_px)
-    
-    # Make sample size managable
-    forest_px = forest_px[::10]
-    nonforest_px = nonforest_px[::10]
-    
-    # Prepare data for sklearn
-    y = np.array(([1] * forest_px.shape[0]) + ([0] * nonforest_px.shape[0]))
-    X = np.vstack((forest_px,nonforest_px))
-    X[np.logical_or(np.isinf(X), np.isnan(X))] = 0.
-    
-    # Split into training and test datasets
-    from sklearn.cross_validation import train_test_split
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.5, random_state = 42)
-    X_test1, X_test2, y_test1, y_test2 = train_test_split(X, y, test_size = 0.5, random_state = 42)
-    
-    from sklearn.ensemble import RandomForestClassifier
-    clf = RandomForestClassifier(random_state = 42, n_estimators = 100, class_weight = 'balanced')
-    clf.fit(X_train, y_train)
-
-    #from sklearn.ensemble import GradientBoostingClassifier
-    #clf = GradientBoostingClassifier(random_state = 42, n_estimators = 100)
-    #clf.fit(X_train, y_train)
-    
-    # Tune the hyperparameters
-    #from sklearn.grid_search import GridSearchCV
-    #param_grid = {'C': [0.001, 0.01, 0.1, 1, 10, 100, 1000], 'penalty':['l1','l2']}
-    #clf = GridSearchCV(LogisticRegression(C = 1.0, penalty = 'l1', class_weight = 'balanced', solver = 'liblinear'), param_grid)
-    #clf.fit(X_train, y_train)
-    #print clf.best_params_
-    
-    # Post-hoc probability calibration. Probably to be recommended where not using logistic regression
-    from sklearn.calibration import CalibratedClassifierCV
-    clf_cal = CalibratedClassifierCV(clf, method="sigmoid", cv="prefit")
-    #X_test1_bal, y_test1_bal = undersampleArray(X_test1, y_test1)
-    clf_cal.fit(X_test1, y_test1)
-    
-    # Quality assessment:
-    # We strongly recommend you carefully consider the quality of your models. These are the metrics that worked for us, but it's perfeclty possible they'll work poorly in your case. Proceed with caution! 
-
-    if output_QA: buildQAPlot(clf, X_test2, y_test2, image_type, output_dir = output_dir)
-        
-    return clf
-
-
-def undersampleArray(array1, array2):
+def _undersampleArray(array1, array2):
     '''
     Function to randomly undersample an array to match the size of the larger array.
+    
     Args:
         array1: A numpy array.
         array2: Another numpy array.
+        
     Returns:
         array1 and array2, with the larger input array resampled to the size of the smaller array.
     '''
@@ -117,10 +61,72 @@ def undersampleArray(array1, array2):
     return array1, array2
 
 
-def _plotConfusionMatrix(cm, classes,
-                          normalize=False,
-                          title='Confusion matrix',
-                          cmap=plt.cm.Blues):
+
+def loadData(data):
+    '''
+    Load data from the .npz file output by extract_training_data.py
+    
+    Args:
+       data: Path to the .npz file
+       
+    Returns:
+        a list of forest pixel values, a list of nonforest pixel values
+    '''
+    
+    data = np.load(data)
+    forest_px = data['forest_px']
+    nonforest_px = data['nonforest_px']
+    
+    return forest_px, nonforest_px
+
+
+def fitModel(forest_px, nonforest_px, output_name, max_pixels = 100000, output_QA = True, output_dir = _getCfgDir()):
+    '''
+    '''
+        
+    # Balance data by undersampling the larger class
+    #forest_px, nonforest_px = _undersampleArray(forest_px, nonforest_px)
+    
+    # Randomise sample
+    np.random.shuffle(forest_px); np.random.shuffle(nonforest_px)
+    
+    # Limit sample size to max_pixels
+    forest_px = forest_px[:max_pixels,:]
+    nonforest_px = nonforest_px[:max_pixels, :]
+    
+    # Prepare data for sklearn
+    y = np.array(([1] * forest_px.shape[0]) + ([0] * nonforest_px.shape[0]))
+    X = np.vstack((forest_px,nonforest_px))
+    
+    X[np.logical_or(np.isinf(X), np.isnan(X))] = 0.
+    
+    # Split into training and test datasets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.5, random_state = 42)
+    #X_test1, X_test2, y_test1, y_test2 = train_test_split(X, y, test_size = 0.5, random_state = 42)
+    
+    # Fir the random forest model.
+    clf = RandomForestClassifier(random_state = 42, n_estimators = 100, class_weight = 'balanced')
+    clf.fit(X_train, y_train)
+
+    #from sklearn.ensemble import GradientBoostingClassifier
+    #clf = GradientBoostingClassifier(random_state = 42, n_estimators = 100)
+    #clf.fit(X_train, y_train)
+        
+    # Post-hoc probability calibration. This performs poorly with seasonality, so we leave it out.
+    # from sklearn.calibration import CalibratedClassifierCV
+    # clf_cal = CalibratedClassifierCV(clf, method="sigmoid", cv="prefit")
+    # #X_test1_bal, y_test1_bal = undersampleArray(X_test1, y_test1)
+    #' clf_cal.fit(X_test1, y_test1)
+    
+    # Quality assessment:
+    # We strongly recommend you carefully consider the quality of your models. These are the metrics that worked for us, but it's perfeclty possible they'll work poorly in your case. Proceed with caution! 
+
+    if output_QA: buildQAPlot(clf, X_test, y_test, output_name, output_dir = output_dir)
+        
+    return clf
+
+
+def _plotConfusionMatrix(cm, classes, normalize=False, title = 'Confusion matrix', cmap = plt.cm.Blues):
     """
     This function prints and plots the confusion matrix.i
     Normalization can be applied by setting `normalize=True`.
@@ -149,9 +155,16 @@ def _plotConfusionMatrix(cm, classes,
     plt.xlabel('Predicted label')
 
 
-def buildQAPlot(clf, X_test, y_test, image_type, output_dir = _getCfgDir()):
+def buildQAPlot(clf, X_test, y_test, output_name, output_dir = _getCfgDir()):
     '''
-    Function to construct a plot with quality assessment metrics for logistic reression fit.
+    Function to construct a plot with quality assessment metrics for the random forest model.
+    
+    Args:
+        clf: The classifier object
+        X_test: Test predictors (separate from training data)
+        y_tesy: Test labels (separate from training data)
+        output_name: String to prepend to ourput file
+        output_dir: Location to output QA plot. Defaults to deforest/cfg/
     '''
     
     import matplotlib.pyplot as plt
@@ -190,57 +203,62 @@ def buildQAPlot(clf, X_test, y_test, image_type, output_dir = _getCfgDir()):
     
     cnf_matrix =  metrics.confusion_matrix(y_test,clf.predict(X_test))
     ax3 = _plotConfusionMatrix(cnf_matrix, classes=['Forest','Nonforest'], normalize=True)
-    import pdb; pdb.set_trace()
+        
     plt.tight_layout()
-    plt.savefig('%s/%s_quality_assessment.png'%(output_dir,image_type))
+    plt.savefig('%s/%s_quality_assessment.png'%(output_dir,output_name))
 
 
-def saveModel(clf, image_type, output_dir = _getCfgDir()):
+def saveModel(clf, output_name, output_dir = _getCfgDir()):
     '''
-    Writes the coefficients from a logistic regression to a csv file in the deforest configuration directory.
+    Saves the model from Scikit-learn to the deforest configuration directory with pickle.
     
     Args:
         clf: A fitted model from sklearn
-        image_type: A string wih the image type (i.e. S1single, S1dual, S2)
+        output_name: A string wih the image type (i.e. S1single, S1dual, S2)
         output_dir: Directory to output model coefficients. Defaults to the cfg directory."
     '''
 
     # Determine name of output file
-    filename = '%s/%s_model.pkl'%(output_dir, image_type)
+    filename = '%s/%s_model.pkl'%(output_dir, output_name)
     
     # Pickle
-    from sklearn.externals import joblib
     file_out = joblib.dump(clf, filename)
 
 
-def main(data, output_dir = _getCfgDir(), regularisation_strength = 1., regularisation_type = 'l1'):
+def main(data, max_samples = 100000, output_dir = _getCfgDir()):
+    '''
+    Train a random forest model to predict the probability of forest/nonforest given data fextracted from imagery by extract_training_data.py.
+    
+    Args:
+        data: A .npz file from extract_training_data.py
+        max_samples: Maximum number of pixels to use in training the classifier
+        output_dir: Directory to save the calibrated model. Defaults to deforest/cfg/.
     '''
     
-    '''
-    
-    # Get image_type
-    image_type = data.split('/')[-1].split('_')[0]
+    # Get output_name
+    output_name = data.split('/')[-1].split('_')[0]
     
     # Get data
     forest_px, nonforest_px = loadData(data)
     
     # Fit an RF model
-    clf = fitModel(forest_px, nonforest_px, image_type, regularisation_strength = regularisation_strength, regularisation_type = regularisation_type, output_QA = True, output_dir = output_dir)
+    clf = fitModel(forest_px, nonforest_px, output_name, max_pixels = max_samples, output_QA = True, output_dir = output_dir)
     
-    # Save model coefficients
-    saveModel(clf, image_type, output_dir = output_dir)
+    # Save the classifier
+    saveModel(clf, output_name, output_dir = output_dir)
     
-
-
 
 if __name__ == '__main__':
     
     '''
-    Script to train a logistic model to classify S1/S2 images into forest/nonforest probabilities. Requires a .npz file from extract_training_data.py.
+    Script to train a Random Forest model to classify S2 images into forest/nonforest probabilities.
+    Returns a calibrated model and QA graphics.
+    
+    Requires a .npz file from extract_training_data.py.
     '''
     
     # Set up command line parser
-    parser = argparse.ArgumentParser(description = "Ingest Sentinel-1 and Sentinel-2 data to train logistic regression functions.")
+    parser = argparse.ArgumentParser(description = "Ingest Sentinel-2 data to train a random forest model to predict the probability of a pixel being forested. Returns a calibrated model and QA graphics.")
 
     parser._action_groups.pop()
     required = parser.add_argument_group('required arguments')
@@ -250,14 +268,13 @@ if __name__ == '__main__':
     required.add_argument('data', metavar = 'DATA', type = str, help = 'Path to .npz file containing training data, generated by extract_training_data.py')
 
     # Optional arguments
-    optional.add_argument('-o', '--output_dir', type=str, metavar = 'PATH', default = _getCfgDir(), help="Directory to output model coefficients. Defaults to the cfg directory.")
-    optional.add_argument('-c', '--regularisation_strength', type=float, metavar = 'F', default = 1., help="Inverse regularisation strength. Low values result in greater regularisation.")
-    optional.add_argument('-r', '--regularisation_type', type=str, metavar = 'T', default = 'l1', help="Regularisation type, either 'l1' or 'l2'. Defaults to 'l1'.")
-
+    optional.add_argument('-m', '--max_samples', type = int, metavar = 'N', default = 100000, help = "Maximum number of samples to train the classifier with. Smaller sample sizes will run faster and produce a simpler model, possibly at the cost of predictive power.")
+    optional.add_argument('-o', '--output_dir', type = str, metavar = 'PATH', default = _getCfgDir(), help = "Directory to save the classifier. Defaults to the deforest/cfg directory.")
+    
     # Get arguments
     args = parser.parse_args()
     
     # Execute script
-    main(args.data, output_dir = args.output_dir, regularisation_strength = args.regularisation_strength, regularisation_type = args.regularisation_type)
+    main(args.data, max_samples = args.max_samples, output_dir = args.output_dir)
     
     #~/anaconda2/bin/python ~/DATA/deforest/deforest/train_logistic_model.py -o ./ S2_training_data.npz
