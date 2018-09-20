@@ -511,7 +511,7 @@ def _classify_all(input_list):
     scene = loadScenes(source_file, md = md_dest, sort = True)
     
     classify_all(scene, md_dest, output_dir = output_dir, output_name = output_name)
-    
+
 
 def classify_all(scenes, md_dest, output_dir = os.getcwd(), output_name = 'classified'):
     '''
@@ -532,7 +532,8 @@ def classify_all(scenes, md_dest, output_dir = os.getcwd(), output_name = 'class
             indices = loadIndices(scene, md = md_dest)
         except:
             print 'Error loading %s'%scene.filename
-        
+            continue
+            
         # Classify the image
         p_forest = classify(indices, scene.image_type)
         
@@ -555,9 +556,21 @@ def main(source_files, target_extent, resolution, EPSG_code, n_processes = 1, ou
         
     """
     
+    # Catch case of single source_file input
+    if type(source_files) != list: source_files = [source_files]
+    
+    # Get absolute path of input files.
+    source_files = [os.path.abspath(i) for i in source_files]
+    
+    # Find files from input directory/granule etc.
+    source_files = sen2mosaic.utilities.prepInfiles(source_files, '2A')
+    
     # Load scene metadata
     md_dest = sen2mosaic.utilities.Metadata(target_extent, resolution, EPSG_code)
     scenes = loadScenes(source_files, md = md_dest, sort = True)
+    
+    # Reduce files to those within md_dest
+    scenes = sen2mosaic.utilities.getSourceFilesInTile(scenes, md_dest)
     
     # Classify
     if n_processes == 1:
@@ -594,15 +607,9 @@ if __name__ == '__main__':
     
     # Get arguments
     args = parser.parse_args()
-    
-    # Get absolute path of input files.
-    infiles = [os.path.abspath(i) for i in args.infiles]
-    
-    # Find files from input directory/granule etc.
-    infiles_S2 = sen2mosaic.utilities.prepInfiles(infiles, '2A')
-    
+        
     # Execute script
-    main(infiles_S2, args.target_extent, args.resolution, args.epsg,n_processes = args.n_processes, output_dir = args.output_dir, output_name = args.output_name)
+    main(args.infiles, args.target_extent, args.resolution, args.epsg,n_processes = args.n_processes, output_dir = args.output_dir, output_name = args.output_name)
     
     # Examples
     #~/anaconda2/bin/python ~/DATA/deforest/deforest/classify.py ../chimanimani/L2_files/S1 -r 60 -e 32736 -te 499980 7790200 609780 7900000 -n S1_test

@@ -11,8 +11,49 @@ import pdb
 
 
 
-def getImageDate(infiles):
+def testSourceFiles(source_files):
     '''
+    Test that a list of raster images have the same CRS and are preprended by the same name.
+    
+    Args:
+        source_files: A list of paths to raster files from deforest.classify.py()
+    
+    Returns:
+        A boolean: True if all of source_files match, False where one or more of source_files don't match
+    '''
+    
+    # Get metadata from the first file
+    name = source_files[0].split('_')[0]
+    ds = gdal.Open(source_files[0],0)
+    geo_t = ds.GetGeoTransform()
+    proj = ds.GetProjection()
+    xSize, ySize = ds.RasterXSize, ds.RasterYSize
+    
+    # Test whether all subsequent files match metadata from the first file
+    for source_file in source_files[1:]:
+        if source_file.split('_')[0] != name:
+            return False
+        ds = gdal.Open(source_file, 0)
+        if ds.GetGeoTransform() != geo_t:
+            return False
+        if ds.GetProjection() != proj:
+            return False
+        if ds.RasterXSize != xSize or ds.RasterYSize != ySize:
+            return False
+    
+    # All tests passed, return True
+    return True
+
+
+def _getImageDate(infiles):
+    '''
+    Extract image date from outputs of deforest.classify()
+    
+    Args:
+        infiles: List of files from deforest.classify()
+    
+    Returns:
+        A list of image dates
     '''
     
     datestrings = ['_'.join(x.split('/')[-1].split('.')[0].split('_')[3:5]) for x in infiles]
@@ -22,8 +63,15 @@ def getImageDate(infiles):
     return dates
 
 
-def getImageType(infiles):
+def _getImageType(infiles):
     '''
+    Extract image type from outputs of deforest.classify()
+    
+    Args:
+        infiles: List of files from deforest.classify()
+    
+    Returns:
+        A list of image types
     '''
     
     image_type = np.array(['_'.join(x.split('/')[-1].split('.')[0].split('_')[1:3]) for x in infiles])
@@ -32,36 +80,50 @@ def getImageType(infiles):
     
 
 
-def combineObservations(probability, mask):
+def _combineObservations(PNF, mask):
     '''
-    For cases where there are more than one observations for a given day, here their forest probabilities are combined.
+    For cases where there are more than one observations for a given day, their forest probabilities should be combined.
     
+    Args:
+        PNF: proability of non forest, 3-dimensional for multiple images
+        mask: The mask for PNF
+    
+    Returns:
+        Combined PNF and mask
     '''
-    
+        
     # Set masked elements to 1, so they have no impact on the multiplication
-    probability[mask] = 1
-    probability_inv = 1 - probability
-    probability_inv[mask] = 1
+    PNF[mask] = 1
+    PNF_inv = 1 - PNF
+    PNF_inv[mask] = 1
      
     # Calculate probability and inverse probability
-    prod = np.prod(probability, axis = 2)
-    prod_inv = np.prod(probability_inv, axis = 2)
+    prod = np.prod(PNF, axis = 2)
+    prod_inv = np.prod(PNF_inv, axis = 2)
     
     # Combine into a single probability
-    probability = prod / (prod + prod_inv)
+    PNF = prod / (prod + prod_inv)
     
     # Identify pixels without a single measurement
     mask = np.sum(mask == False, axis = 2) == 0
     
     # Keep things tidy
-    probability[mask] = 0.
+    PNF[mask] = 0.
     
-    return probability, mask
+    return PNF, mask
 
     
 
-def bayesUpdate(prior, likelihood):
+def _bayesUpdate(prior, likelihood):
     '''
+    Update Baysian prior based on new observation.
+    
+    Args:
+        prior: Prior probability of non-forest
+        likelihood: Probability of forest from new observation
+    
+    Returns:
+        posterior probability
     '''
     
     posterior = (prior * likelihood) / ((prior * likelihood) + ((1 - prior) * (1 - likelihood))) 
@@ -71,123 +133,140 @@ def bayesUpdate(prior, likelihood):
 
 
 
-def calculateDeforestation(infiles, deforestation_threshold = 0.995):
+def calculateDeforestation(infiles, deforestation_threshold = 0.99, block_weight = 0.1):
     '''
+    Calculate deforestation using the 'bayts' method of Reiche et al. (2018), re-written into Pyton by Samuel Bowers.
+    
+    Function takes a list of paths to input rasters in the same CRS/resolution, where 0-100 = probability of a pixel being forested and 255 = nodata. Deforestation is identified based on a Bayesian method, where deforestation_threshold is the treshold probability for identifiying deforestation and block_weight limits the range of probabilities in input files.
+    
+    Credit for method: Reiche et al. (2018)
+    
+    Args:
+        infiles: A list of GDAL-compatible input files from deforest.classify()
+        deforestation_threshold: Threshold probability for flagging deforestation. Defaults to 0.99. Must be between > 0.5 an < 1.0.
+        block_weight: Limits the probability range of input files. For example, default block_weight 0.1 allows of a probability range of 0.1 to 0.9 in input files. This reduces the probability of false positives.
+    
+    Returns
+        confirmed deforestation (years), warning deforestation (%)
+    
     '''
     
-    # Get datetimes for each image
-    dates = getImageDate(infiles)
-    months = dates.astype('datetime64[M]').astype(int) % 12 + 1
-    dates_include = dates[months<10]
+    assert deforestation_threshold < 1. and deforestation_threshold > 0.5, "Deforestation theshold must be greater than 0.5 and less than 1."
+    assert block_weight < 0.5, "Block weight must be less than 0.5."
     
-    # Get the image_type for each image
-    image_type = getImageType(infiles)
+    # Get absolute path of input .safe files, an update to an array
+    infiles = [os.path.abspath(i) for i in args.infiles]
+    infiles = np.array(infiles)
+    
+    # Get datetime and image type for each image
+    dates = _getImageDate(infiles)
+    image_type = _getImageType(infiles)
         
-    # Initialise arrays
+    # Initialise output arrays
     ds = gdal.Open(infiles[0])
-
-    YSize = ds.RasterYSize
-    XSize = ds.RasterXSize
-        
-    deforestation = np.zeros((YSize, XSize), dtype=np.bool)
+    deforestation = np.zeros((ds.RasterYSize, ds.RasterXSize), dtype=np.bool)
     warning = np.zeros_like(deforestation, dtype=np.bool)
-    #PNF_last = np.zeros_like(deforestation, dtype = np.float) + 0.5 # Initialise to 0.5 probability of no forest
     deforestation_date = np.zeros_like(deforestation, dtype='datetime64[D]')
     pchange = np.zeros_like(deforestation, dtype=np.float)
 
-
-    # Run for each unique date
+    # For each date in turn
     for date in sorted(np.unique(dates)):
         
-        unique_datetimes = np.unique(dates[dates == date])
-        unique_images = np.unique(image_type[dates == date])
+        # Get unique image types (max one measurement per pixel per sensor per day permitted)
+        image_types = np.unique(image_type[dates == date])
         
-        #TODO find repeat data in Sentinel-2 imagery. This is tricky, as datetimes can be different yet imagery the same in tile overlap.
+        # Build blank probability of forest image
+        PF = np.zeros((ds.RasterYSize, ds.RasterXSize, image_types.shape[0]), dtype = np.uint8) + 255
         
-        # One layer per unique image type. This should allow only one overpass per satellite per granule/track. Needs work to accomodate Sentinel-2 tiles
-                
-        p_forest = np.zeros((YSize, XSize, unique_images.shape[0]), dtype = np.uint8) + 255
+        for n, this_image_type in enumerate(image_types):
             
-        for n, this_image_type in enumerate(unique_images):
-            
-            # Only select one data file per image type
+            # Build a single composite p_forest image for each image type per date
             for infile in infiles[np.logical_and(dates == date, image_type == this_image_type)]:
                     
                 print 'Loading %s'%infile
-                data = gdal.Open(infile,0).ReadAsArray()#[3000:5000,1000:3000]
+                data = gdal.Open(infile,0).ReadAsArray()
                 
                 # Select areas that still have the nodata value
-                s = p_forest[:,:,n] == 255
+                s = PF[:,:,n] == 255
                 
                 # Paste the new data into these locations
-                p_forest[:,:,n][s] = data[s]
-        #pdb.set_trace()
+                PF[:,:,n][s] = data[s]
+        
         # Change percent probability of forest to probability of non forest
-        mask = p_forest == 255
+        PNF = (100 - PF) / 100.
+        mask = PF == 255
         
-        PNF = (100 - p_forest) / 100.
-        PNF[mask] = 0.
-        
-        # Remove length-1 axes
         PNF = np.squeeze(PNF)
         mask = np.squeeze(mask)
-            
-        ## Apply block weighting
-        PNF[PNF < 0.1] = 0.1
-        PNF[PNF > 0.9] = 0.9
+        
+        # Apply block weighting
+        PNF[PNF < block_weight] = block_weight
+        PNF[PNF > 1 - block_weight] = 1 - block_weight
         
         # If multiple observations from the same date exist, combine them (not performed where only one observation)
-        if unique_images.shape[0] > 1:
-            
-            PNF, mask = combineObservations(PNF, mask)
+        if image_types.shape[0] > 1:
+            PNF, mask = _combineObservations(PNF, mask)
+          
+        ##################################
+        # Step 1: Flag potential changes #
+        ##################################
         
-        # Step 1: Flag potential changes
         flag = PNF > 0.5
-            
-        # Step 2: Update pchange for current time step
         
-        # Case A: A new flag appears
-        s = np.logical_and(np.logical_and(np.logical_and(warning == False, flag == True), deforestation == False), mask == False)
-        pchange[s] = PNF[s]
-        deforestation_date[s] = date
-        warning[s] = True
+        ################################################
+        # Step 2: Update pchange for current time step #
+        ################################################
         
-        # Case B: There is a warning in place, but no confirmation
-        s = np.logical_and(np.logical_and(warning == True, deforestation == False),  mask == False)
-        pchange[s] = bayesUpdate(pchange[s], PNF[s])
+        # Case A: A new flag appears. Set pchange to PNF.
+        sel = (warning == False) & flag & (deforestation == False) & (mask == False)
+        pchange[sel] = PNF[sel]
+        deforestation_date[sel] = date
+        warning[sel] = True
         
+        # Case B: There is a warning in place, but no confirmation. Update pchange using PNF.
+        sel = warning & (deforestation == False) & (mask == False)
+        pchange[sel] = _bayesUpdate(pchange[sel], PNF[sel])
         
-        # Step 3: Reject or accept warnings
+        #####################################
+        # Step 3: Reject or accept warnings #
+        #####################################
         
-        # Case A: Reject warning where pchange falls below 50 %
-        s = np.logical_and(np.logical_and(np.logical_and(warning == True, pchange <= 0.5), deforestation == False), mask == False)
-        warning[s] = False
+        # Case A: Reject warning where pchange falls below 50%
+        sel = warning & (pchange < 0.5) & (deforestation == False) & (mask == False)
+        warning[sel] = False
         
         # Tidy up
-        deforestation_date[s] = dt.date(1970,1,1)
+        deforestation_date[sel] = dt.date(1970,1,1)
         pchange[s] = 0.
         
-        # Case B: Confirm warning where pchange > chi (hardwired to 99 %)
-        s = np.logical_and(np.logical_and(np.logical_and(warning == True, pchange > deforestation_threshold), deforestation == False), mask == False)
-        deforestation[s] = True
-                
-            
+        # Case B: Confirm warning where pchange > deforestation_threshold
+        sel = warning & (deforestation == False) & (pchange >= deforestation_threshold) & (mask == False)
+        deforestation[sel] = True
+    
+    # Get day of year of change
     change_day = (deforestation_date - deforestation_date.astype('datetime64[Y]')).astype(np.float32)
     
+    # Output year of deforestation for confirmed events (units = year)
     confirmed_deforestation = deforestation_date.astype('datetime64[Y]').astype(np.float32) + 1970. + (change_day/365.)
     confirmed_deforestation[deforestation == False] = 0.
     confirmed_deforestation[confirmed_deforestation == 1970] = 0.
-
-    warning_deforestation = pchange
-    warning_deforestation[deforestation == True] = 0
-    warning_deforestation[pchange<0.5] = 0
-    warning_deforestation[warning_deforestation == 1970] = 0
-
+    
+    # Return the final probability of early warning pixels (units = %)
+    warning_deforestation = pchange * 100.
+    warning_deforestation[deforestation == True] = 0.
+    warning_deforestation[pchange < 0.5] = 0.
+    
     return confirmed_deforestation, warning_deforestation
 
 
 def outputImage(array, image_like, filename):
     '''
+    Output a numpy array to a GeoTiff using an example projected image.
+    
+    Args:
+        array: A numpy array
+        image_like: Path to a GDAL-compatible raste file of the same CRS as array
+        filename: Output filename
     '''
     
     data_ds = gdal.Open(image_like)
@@ -198,21 +277,32 @@ def outputImage(array, image_like, filename):
     ds.GetRasterBand(1).WriteArray(array)
     ds = None
         
-
-
-def main(infiles, output_dir = os.getcwd(), output_name = 'OUTPUT'):
-    '''
-    '''
+        
     
-    infiles = np.array(infiles)
+def main(source_files, deforestation_threshold = 0.99, block_weight = 0.1, output_dir = os.getcwd(), output_name = 'OUTPUT'):
+    '''
+    Process a list of probability maps to generate a map of deforestation year and warning estimates of upcoming events. Outputs a GeoTiff of confirmed deforestation years and warnings of deforestation.
+    
+    Args:
+        source_files: A list of GDAL-compatible input files from deforest.classify()
+        deforestation_threshold: Threshold probability for flagging deforestation. Defaults to 0.99. Must be between > 0.5 an < 1.0.
+        block_weight: Limits the probability range of input files. For example, default block_weight 0.1 allows of a probability range of 0.1 to 0.9 in input files. This reduces the probability of false positives.
+        output_dir = Directory to output GeoTiffs
+        output_name = String to prepend to output images
+        '''
+    
+    # Get absolute path of input files
+    source_files = [os.path.abspath(i) for i in source_files]
+    
+    # Check that input files are valid
+    assert testSourceFiles(source_files), "Input files must have the same CRS and the same name."
     
     # Run through images
-    deforestation_confirmed, deforestation_warning = calculateDeforestation(infiles)
+    deforestation_confirmed, deforestation_warning = calculateDeforestation(source_files, deforestation_threshold = deforestation_threshold, block_weight = block_weight)
     
     # Output images
-    outputImage(deforestation_confirmed, infiles[0], '%s/%s_%s.tif'%(output_dir, output_name, 'confirmed'))
-    
-    outputImage(deforestation_warning, infiles[0], '%s/%s_%s.tif'%(output_dir, output_name, 'warning'))
+    outputImage(deforestation_confirmed, source_files[0], '%s/%s_%s.tif'%(output_dir, output_name, 'confirmed'))
+    outputImage(deforestation_warning, source_files[0], '%s/%s_%s.tif'%(output_dir, output_name, 'warning'))
 
 
 if __name__ == '__main__':
@@ -227,18 +317,17 @@ if __name__ == '__main__':
     optional = parser.add_argument_group('optional arguments')
 
     # Required arguments
-    required.add_argument('infiles', metavar = 'FILES', type = str, nargs = '+', help = 'Files output by classify.py, including wildcards where desired.')
+    required.add_argument('infiles', metavar = 'FILES', type = str, nargs = '+', help = 'A list of files output by classify.py, including wildcards where desired.')
     
     # Optional arguments
+    optional.add_argument('-t', '--threshold', metavar = 'N', type = float, default = 0.99, help = 'Set a threshold probability to identify deforestation (between 0 and 1). High thresholds are more strict in the identification of deforestation. Defaults to 0.99.')
+    optional.add_argument('-b', '--block_weight', metavar = 'N', type = float, default = 0.1, help = 'Set a block weighting threshold to limit the range of forest/nonforest probabilities. Set to 0 for no block-weighting. Parameter cannot be set higher than 0.5.')
     optional.add_argument('-o', '--output_dir', type=str, metavar = 'DIR', default = os.getcwd(), help="Optionally specify an output directory. If nothing specified, downloads will output to the present working directory, given a standard filename.")
-    optional.add_argument('-n', '--output_name', type=str, metavar = 'NAME', default = 'deforestation', help="Optionally specify a string to precede output filename.")
-        
+    optional.add_argument('-n', '--output_name', type=str, metavar = 'NAME', default = '', help="Optionally specify a string to precede output filename. Defaults to the same as input files.")
+    
     # Get arguments
     args = parser.parse_args()
-
-    # Get absolute path of input .safe files.
-    infiles = [os.path.abspath(i) for i in args.infiles]
-    
-    main(infiles, output_dir = args.output_dir, output_name = args.output_name)
+        
+    main(args.infiles, deforestation_threshold = args.threshold, block_weight = args.block_weight, output_dir = args.output_dir, output_name = args.output_name)
 
 

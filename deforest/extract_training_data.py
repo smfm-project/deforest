@@ -373,7 +373,7 @@ def extractData(scenes, training_data, md_dest, forest_values, nonforest_values,
     return forest, nonforest
 
 
-def main(source_files, target_extent, resolution, EPSG_code, training_data, forest_values, nonforest_values, attribute_name = '', n_processes = 1, max_pixels = 5000, output_dir = os.getcwd(), output_name = 'S2'):
+def main(source_files, target_extent, resolution, EPSG_code, training_data, forest_values, nonforest_values, attribute_name = '', n_processes = 1, max_images = 0, max_pixels = 5000, output_dir = os.getcwd(), output_name = 'S2'):
     '''main(source_files, training_data, target_extent, resolution, EPSG_code, n_processes = 1, max_pixels = 5000, output_dir = os.getcwd(), output_name = 'S2')
     
     Extract pixel values from source_files and output as a np.savez() file. This is the function that is initiated from the command line.
@@ -388,6 +388,7 @@ def main(source_files, target_extent, resolution, EPSG_code, training_data, fore
         nonforest_values: A list of raster classes (integers) or shapefile attribute values (str) indicating nonforest in training_data.
         attribute_name: Shapefile attribute under which forest_values and nonforest_values can be found
         n_processes: Number of processes, defaults to 1.
+        max_images: Maximum number of input tiles to extract data from. Defaults to 0, meaning all valid tiles.
         max_pixels: Maximum number of pixels to extract for each class from each image. Defaults to 5000.
         output_dir: Directory to output classifier predictors. Defaults to current working directory.
         output_name: Name to precede output file. Defaults to 'S2'.
@@ -395,10 +396,25 @@ def main(source_files, target_extent, resolution, EPSG_code, training_data, fore
     '''
     
     assert type(n_processes) == int and n_processes > 0, "n_processes must be an integer > 0."
-        
+    
+    # Get absolute path of input .safe files.
+    source_files = [os.path.abspath(i) for i in source_files]
+    
+    # Find files from input directory/granule etc.
+    source_files = sen2mosaic.utilities.prepInfiles(source_files, '2A')
+    
     # Load and sort input scenes
     md_dest = sen2mosaic.utilities.Metadata(target_extent, resolution, EPSG_code)
     scenes = classify.loadScenes(source_files, md = md_dest, sort = True)
+
+    # Reduce files to those overlapping with md_dest
+    scenes = sen2mosaic.utilities.getSourceFilesInTile(scenes, md_dest)
+
+    # Reduce number of inputs to max_images
+    if max_images > 0 and len(scenes) > max_images:
+        scenes =  [scenes[i] for i in sorted(random.sample(range(len(scenes)), max_images))]
+    
+    assert len(scenes) > 0, "No valid input files found at specified location."
     
     # Extract pixel values
     if n_processes == 1:
@@ -407,7 +423,6 @@ def main(source_files, target_extent, resolution, EPSG_code, training_data, fore
     # Extract pixels by multi-processing
     else:
         instances = multiprocessing.Pool(n_processes)
-        
         forest_px, nonforest_px = _unpackOutputs(instances.map(_extractData, [[scene.filename, training_data, target_extent, resolution, EPSG_code, forest_values, nonforest_values, attribute_name, max_pixels] for scene in scenes]))
         instances.close()
         
@@ -428,7 +443,7 @@ if __name__ == '__main__':
 
     # Required arguments
     required.add_argument('-te', '--target_extent', nargs = 4, metavar = ('XMIN', 'YMIN', 'XMAX', 'YMAX'), type = float, help = "Extent of output image tile, in format <xmin, ymin, xmax, ymax>.")
-    required.add_argument('-e', '--epsg', type=int, help="EPSG code for output image tile CRS. This must be UTM. Find the EPSG code of your output CRS as https://www.epsg-registry.org/.")
+    required.add_argument('-e', '--epsg', type = int, help="EPSG code for output image tile CRS. This must be UTM. Find the EPSG code of your output CRS as https://www.epsg-registry.org/.")
     required.add_argument('-res', '--resolution', metavar = 'N', type=int, help = "Specify a resolution to output.")
     required.add_argument('-t', '--training_data', metavar = 'SHP/TIF', type = str, help = 'Path to training data geotiff/shapefile.')
     required.add_argument('-f', '--forest_values', metavar = 'VALS', type = str, nargs = '*', help = 'Values indicating forest in the training GeoTiff or shapefile')
@@ -446,26 +461,13 @@ if __name__ == '__main__':
     # Get arguments
     args = parser.parse_args()
     
-    # Get absolute path of input .safe files.
-    infiles = [os.path.abspath(i) for i in args.infiles]
-    
-    # Find files from input directory/granule etc.
-    infiles = sen2mosaic.utilities.prepInfiles(infiles, '2A')
-    #infiles_S1 = sen1mosaic.utilities.prepInfiles(infiles)
-    
-    assert len(infiles) > 0, "No valid input files found at specified location."
-    
-    # Reduce number of inputs to max_images
-    if args.max_images > 0 and len(infiles) > args.max_images:
-        infiles =  [infiles[i] for i in sorted(random.sample(range(len(infiles)), args.max_images))]
-    
     # Format training data values
     if args.training_data.split('.')[-1] in ['tiff', 'tif', 'vrt']:
         args.forest_values = [int(v) for v in args.forest_values]
         args.nonforest_values = [int(v) for v in args.nonforest_values]
     
     # Execute script
-    main(infiles, args.target_extent, args.resolution, args.epsg, args.training_data, args.forest_values, args.nonforest_values, attribute_name = args.attribute_name, n_processes = args.n_processes, max_pixels = args.max_pixels, output_dir = args.output_dir, output_name = args.output_name)
+    main(args.infiles, args.target_extent, args.resolution, args.epsg, args.training_data, args.forest_values, args.nonforest_values, attribute_name = args.attribute_name, n_processes = args.n_processes, max_pixels = args.max_pixels, output_dir = args.output_dir, output_name = args.output_name)
     
     # Example:
     # ~/anaconda2/bin/python ~/DATA/deforest/deforest/extract_training_data.py ../chimanimani/L2_files/S2/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t ~/SMFM/landcover/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -o ./ --max_images 100 -p 20 -f 1 -nf 2 3 4 5 6 7 8 10
