@@ -314,7 +314,7 @@ def _loadS2(scene, md = None):
     
 
     features = np.zeros((mask.shape[0], mask.shape[1], 20), dtype = np.float32)
-    
+        
     # Don't report div0 errors
     with np.errstate(divide = 'ignore', invalid = 'ignore'):
         
@@ -363,7 +363,7 @@ def _loadS2(scene, md = None):
     # CLAHE (spatial context)
     features[:,:,13] = _adapthist(features[:,:,0], md, 2400, clip_limit = 0.75)
     features[:,:,14] = _adapthist(features[:,:,0], md, 4800, clip_limit = 0.75)
-
+    
     # Texture
     features[:,:,15] = _stdev_filter(features[:,:,0], window_size = 3)
     features[:,:,16] = _stdev_filter(features[:,:,0], window_size = 9)
@@ -377,7 +377,7 @@ def _loadS2(scene, md = None):
 
     # Tidy up residual nodata values
     features[np.logical_or(np.isinf(features), np.isnan(features))] = 0.
-    
+    print 'Done'
     return features
 
 
@@ -561,7 +561,7 @@ def main(source_files, target_extent, resolution, EPSG_code, n_processes = 1, ou
     
     # Classify
     if n_processes == 1:
-        classify_all(scenes, md_dest)
+        classify_all(scenes, md_dest, output_dir = output_dir, output_name = output_name)
     
     # Classify in parallel
     elif n_processes > 1:
