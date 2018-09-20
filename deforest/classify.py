@@ -1,6 +1,7 @@
 
 import argparse
 import csv
+import cv2
 import datetime
 import glob
 import math
@@ -10,6 +11,7 @@ import numpy as np
 import os
 from osgeo import gdal
 import scipy.ndimage
+from scipy import signal
 import skimage.filters.rank
 from skimage.morphology import disk
 import skimage.exposure
@@ -30,15 +32,62 @@ global X # Feature array
 global clf # Model
 
 
-
-    
-
-def loadS1Single(scene, md = None, polarisation = 'VV', normalisation_type = 'NONE', reference_scene = None):
-    """
-    Extract backscatter data given .dim file and polarisation
+def loadScenes(source_files, md = None, sort = True):
+    '''
+    Load and sort input scenes (Sentinel-2).
     
     Args:
-        dim_file:
+        source_files: List of Sentinel-2 granule directories
+        md: sen2mosaic.utilities.Metadata() object. If specified, images from outside the md are not loaded.
+        sort: Set True to sort files by date
+    
+    Returns: 
+        A list of scenes of class utilities.LoadScene()
+    '''
+    
+    def getS2Res(resolution):
+        '''
+        '''
+        
+        if float(resolution) < 60:
+            return 20
+        else:
+            return 60
+    
+    # Allow for the processing of one source_file or list of source_files
+    if type(source_files) != list: source_files = [source_files]
+    
+    # Load scenes
+    scenes = []
+    for source_file in source_files:
+        try:
+            scenes.append(sen2mosaic.utilities.LoadScene(source_file, resolution = getS2Res(md.res)))
+        except AssertionError:
+            continue
+        except IOError:
+            try:
+                scenes.append(sen1mosaic.utilities.LoadScene(source_file))
+            except:
+                print 'WARNING: Failed to load scene: %s'%source_file.filename
+                continue
+    
+    if md is not None:
+        # Remove scenes that aren't within output extent
+        scenes = sen2mosaic.utilities.getSourceFilesInTile(scenes, md)
+    
+    # Sort by date
+    if sort:
+        scenes = [scene for _,scene in sorted(zip([s.datetime.date() for s in scenes],scenes))]
+    
+    return scenes
+
+
+def _loadS1Single(scene, md = None, polarisation = 'VV'):
+    """
+    Extract backscatter data given .dim file and polarisation.
+    
+    Args:
+        dim_file: Path to a .dim file from a pre-processed Sentinel-1 image
         polarisation: (i.e. 'VV' or 'VH')
     
     Returns:
@@ -51,19 +100,15 @@ def loadS1Single(scene, md = None, polarisation = 'VV', normalisation_type = 'NO
     # Turn into a masked array
     indices = np.ma.array(indices, mask = mask)
     
-    # Normalise data
-    if normalisation_type != 'NONE':
-        indices = normalise(indices, md = md, normalisation_type = normalisation_type, reference_scene = reference_scene)
-    
     return indices
 
 
-def loadS1Dual(scene, md = None, normalisation_type = 'NONE', reference_scene = None):
+def _loadS1Dual(scene, md = None):
     """
     Extract backscatter metrics from a dual-polarised Sentinel-1 image.
     
     Args:
-        dim_file: 
+        dim_file: Path to a .dim file from a pre-processed Sentinel-1 image
     
     Returns:
         A maked numpy array of VV, VH and VV/VH backscatter.
@@ -71,24 +116,28 @@ def loadS1Dual(scene, md = None, normalisation_type = 'NONE', reference_scene = 
     
     assert scene.image_type == 'S1dual', "input file %s does not appear to be a dual polarised Sentinel-1 file"%dim_file
     
-    VV = loadS1Single(scene, md = md, polarisation = 'VV')
-    
-    VH = loadS1Single(scene, md = md, polarisation = 'VH')
+    VV = _loadS1Single(scene, md = md, polarisation = 'VV')
+    VH = _loadS1Single(scene, md = md, polarisation = 'VH')
     
     VV_VH = VH - VV # Proportional difference, logarithmic
     
     indices = np.ma.dstack((VV, VH, VV_VH))
-    
-    # Normalise data
-    if normalisation_type != 'NONE':
-        indices = normalise(indices, md = md, normalisation_type = normalisation_type, reference_scene = reference_scene)
         
     return indices
 
 
-
-def adapthist(im, md, radius = 4800, clip_limit = 0.75):
+def _adapthist(im, md, radius, clip_limit = 0.75):
     '''
+    Perform Contrast Limited Adative Histogram Equalisation (CLAHE) on an image. This should accentuate areas of forest/nonforest.
+    
+    Args:
+        im: A numpy array
+        md: Metadata of im (sen2mosaic.utilities.Metadata() object().
+        radius: The scale (in m) over which histogram equalisation is performed.
+        clip_limit: Maximum histogram intensity. Higher values result in greater contrast in the resulting image.
+    
+    Returns:
+        im, following histogram equalisation
     '''
     
     size = float(radius) / md.res
@@ -103,7 +152,6 @@ def adapthist(im, md, radius = 4800, clip_limit = 0.75):
     ind = scipy.ndimage.distance_transform_edt(data_rescaled.mask, return_distances = False, return_indices = True)
     data_rescaled = data_rescaled.data[tuple(ind)]
     
-    import cv2
     clahe = cv2.createCLAHE(clipLimit = clip_limit, tileGridSize = kernel_size)
     data_rescaled = clahe.apply(data_rescaled) / 65535.
         
@@ -111,13 +159,19 @@ def adapthist(im, md, radius = 4800, clip_limit = 0.75):
     
     return im
     
+def _mean_filter(im, window_size = 3):
+    '''
+    Runs an averaging (mean) filter over an image.
     
-
-def mean_filter(im, window_size = 3):
+    Args:
+        im: A numpy array.
+        window_size: An integer defining the size of the averaging window. Must be an odd number.
+    
+    Retuns:
+        im, filtered
     '''
-    '''
-
-    from scipy import signal
+    
+    assert window_size % 2 == 1 and type(window_size) == int, "Window size must be ean odd number."
 
     border = window_size / 2
     
@@ -126,14 +180,21 @@ def mean_filter(im, window_size = 3):
     return im_filt[border:-border, border:-border]
     
     
-def stdev_filter(im, window_size = 3):
+def _stdev_filter(im, window_size = 3):
     '''
-    Based on https://stackoverflow.com/questions/18419871/improving-code-efficiency-standard-deviation-on-sliding-windows
-    and http://nickc1.github.io/python,/matlab/2016/05/17/Standard-Deviation-(Filters)-in-Matlab-and-Python.html
+    Run a standard deviation filter over an image.
+    Based on https://stackoverflow.com/questions/18419871/improving-code-efficiency-standard-deviation-on-sliding-windows and http://nickc1.github.io/python,/matlab/2016/05/17/Standard-Deviation-(Filters)-in-Matlab-and-Python.html
+    
+    Args:
+        im: A numpy array.
+        window_size: An integer defining the size of the averaging window. Must be an odd number.
+    
+    Returns:
+        im, filtered
     '''
     
-    c1 = mean_filter(im, window_size = window_size)
-    c2 = mean_filter(im * im, window_size = window_size)
+    c1 = _mean_filter(im, window_size = window_size)
+    c2 = _mean_filter(im * im, window_size = window_size)
     
     variance = c2 - c1 * c1
     variance[variance < 0] += 0.0001 # Prevents divide by zero errors.
@@ -141,18 +202,18 @@ def stdev_filter(im, window_size = 3):
     return np.ma.array(np.sqrt(variance), mask = im.mask)
 
 
-def build_percentile_image(im, md, percentile = 95., radius = 1200):
+def _build_percentile_image(im, md, percentile = 95., radius = 1200):
     """
-    This approximates the operation of a percentile filter, by downsampling blocks and interpolating across the image. A percetnile file operates far too slowly to be practical.
+    Approximates the operation of a percentile filter for a masked numpy array, by downsampling blocks and interpolating across the image. Existing percentile filters operate far too slowly to be practical, and are not designed for masked arays. This function correlates strongly (Pearson's R ~0.85) with the outputs of a percentile filter.
     
     Args:
-        im: masked numpy array
-        md: Metadata()
-        percentile: Percentile to extact for each pixel
-        radius: Search radius to calculate block size
+        im: A masked numpy array
+        md: Metadata of im (sen2mosaic.utilities.Metadata() object().
+        percentile: Percentile to extact for each pixel, between 0-100.
+        radius: Search radius in m to calculate block size. Larger values are equivalent to a larger filter kernel size.
         
     Returns:
-        
+        im, filtered
     """
     
     # Calculate the size of each block
@@ -191,18 +252,42 @@ def build_percentile_image(im, md, percentile = 95., radius = 1200):
     im_out = np.ma.array(im_out, mask = im.mask)
     
     return im_out
-    
-    
 
-def loadS2(scene, md = None, normalisation_type = 'none', reference_scene = None):
+
+def _time_of_year(scene_datetime, shape, function = 'sin'):
+    '''
+    Generate a time of year feature, based on trigonometric functions. sin and a cos functions operatate circularly, so may make for better features than a day of year.
+    
+    Args:
+        scene_datetime: a datetime.datetime object
+        shape: a tuple for the output shaper
+        function: 'sin' or 'cos', defaults to 'sin'
+    
+    Returns:
+        A numpy array
+    '''
+    
+    assert function in ['sin', 'cos'], "Function must be 'sin' or 'cos'."
+    
+    # Spring/Autumn
+    if function == 'sin':
+        return np.zeros(shape, dtype = np.float32) + np.sin(((scene_datetime.date() - datetime.date(scene_datetime.year,1,1)).days / 365.) * 2 * np.pi)
+      
+    # Winter/Summer
+    elif function == 'cos':
+        return np.zeros(shape, dtype = np.float32) + np.cos(((scene_datetime.date() - datetime.date(scene_datetime.year,1,1)).days / 365.) * 2 * np.pi)    
+
+
+def _loadS2(scene, md = None):
     """
     Calculate a range of vegetation features given .SAFE file and resolution.
     
     Args:
-        scene: 
+        scene: A sen2mosaic.utilities.LoadScene() object
+        md: A sen2mosaic.utilities.Metadata() object. Defaults to 'None', which takes the extent of the input file.
     
     Returns:
-        A maked numpy array of vegetation features.
+        A maked numpy array of 20 vegetation features for predicting forest/nonforest probabilities.
     """
        
     mask = scene.getMask(correct = True, md = md)
@@ -233,34 +318,34 @@ def loadS2(scene, md = None, normalisation_type = 'none', reference_scene = None
     # Don't report div0 errors
     with np.errstate(divide = 'ignore', invalid = 'ignore'):
         
-        # Calculate a series of vegetation indices (based on Shultz 2016)
+        # Calculate a series of vegetation indices (based loosely on Shultz 2016)
         
-        # NDVI
+        # NDVI (vegetation)
         features[:,:,0][mask == False] = (B08 - B04) / (B08 + B04)
         
-        # EVI
+        # EVI (vegetation)
         features[:,:,1][mask == False] = ((B08 - B04) / (B08 + 6 * B04 - 7.5 * B02 + 1)) * 2.5
         
-        # GEMI
+        # GEMI (vegetation)
         n = (2 * (B08 ** 2 - B04 ** 2) + 1.5 * B08 + 0.5 * B04) / (B08 + B04 + 0.5)
         features[:,:,2][mask == False] = (n * (1 - 0.25 * n)) - ((B04 - 0.125) / (1 - B04))
         
-        # NDMI
+        # NDMI (vegetation)
         features[:,:,3][mask == False] = (B08 - B11) / (B08 + B11)
         
-        # SAVI
+        # SAVI (vegetation)
         features[:,:,4][mask == False] = (1 + 0.5) * ((B08 - B04) / (B08 + B04 + 0.5))
 
-        # RENDVI
+        # RENDVI (vegetation)
         features[:,:,5][mask == False] = (B06 - B05) / (B05 + B06) #(2 * B01)
         
-        # SIPI
+        # SIPI (vegetation)
         features[:,:,6][mask == False] = (B08 - B01) / (B08 - B04) 
         
-        # NBR
+        # NBR (fire)
         features[:,:,7][mask == False] = (B08 - B12) / (B08 + B12)
         
-        # MIRBI
+        # MIRBI (fire)
         features[:,:,8][mask == False] = (10 * B12) - (9.8 * B11) + 2
         
         # Get rid of inifite values etc.
@@ -269,36 +354,34 @@ def loadS2(scene, md = None, normalisation_type = 'none', reference_scene = None
         # Turn into a masked array
         features = np.ma.array(features, mask = np.repeat(np.expand_dims(mask,2), features.shape[-1], axis=2))
     
-    # Hamunyela et al. functions
-    features[:,:,9]  = features[:,:,0] / build_percentile_image(features[:,:,0], md, radius = 1200)
-    features[:,:,10] = features[:,:,0] / build_percentile_image(features[:,:,0], md, radius = 2400)
-    features[:,:,11] = features[:,:,0] / build_percentile_image(features[:,:,0], md, radius = 4800)
-    features[:,:,12] = features[:,:,0] / build_percentile_image(features[:,:,0], md, radius = 9600)
+    # Hamunyela et al. functions (spatial context)
+    features[:,:,9]  = features[:,:,0] / _build_percentile_image(features[:,:,0], md, radius = 1200)
+    features[:,:,10] = features[:,:,0] / _build_percentile_image(features[:,:,0], md, radius = 2400)
+    features[:,:,11] = features[:,:,0] / _build_percentile_image(features[:,:,0], md, radius = 4800)
+    features[:,:,12] = features[:,:,0] / _build_percentile_image(features[:,:,0], md, radius = 9600)
     
-    # CLAHE
-    features[:,:,13] = adapthist(features[:,:,0], md, radius = 2400, clip_limit = 0.75)
-    features[:,:,14] = adapthist(features[:,:,0], md, radius = 4800, clip_limit = 0.75)
+    # CLAHE (spatial context)
+    features[:,:,13] = _adapthist(features[:,:,0], md, 2400, clip_limit = 0.75)
+    features[:,:,14] = _adapthist(features[:,:,0], md, 4800, clip_limit = 0.75)
 
     # Texture
-    features[:,:,15] = stdev_filter(features[:,:,0], window_size = 3)
-    features[:,:,16] = stdev_filter(features[:,:,0], window_size = 9)
+    features[:,:,15] = _stdev_filter(features[:,:,0], window_size = 3)
+    features[:,:,16] = _stdev_filter(features[:,:,0], window_size = 9)
     
     # Coefficient of variation (seasonality??)
-    features[:,:,17] = features[:,:,16] / mean_filter(features[:,:,16], window_size = 9)
+    features[:,:,17] = features[:,:,16] / _mean_filter(features[:,:,16], window_size = 9)
     
-    # Spring/Autumn
-    features[:,:,18] = np.zeros_like(features[:,:,0]) + np.sin(((scene.datetime.date() - datetime.date(scene.datetime.year,1,1)).days / 365.) * 2 * np.pi)
-    
-    # Winter/Summer
-    features[:,:,19] = np.zeros_like(features[:,:,0]) + np.cos(((scene.datetime.date() - datetime.date(scene.datetime.year,1,1)).days / 365.) * 2 * np.pi)
-    
+    # Time of year
+    features[:,:,18] = _time_of_year(scene.datetime, features[:,:,0].shape, function = 'sin')
+    features[:,:,19] = _time_of_year(scene.datetime, features[:,:,0].shape, function = 'cos')
+
     # Tidy up residual nodata values
     features[np.logical_or(np.isinf(features), np.isnan(features))] = 0.
     
     return features
 
 
-def loadIndices(scene, md = None, normalisation_type = 'none', reference_scene = None, force_S1single = False):
+def loadIndices(scene, md = None, force_S1single = False):
     '''
     Load indices from a Sentinel-1 or Sentinel-2 utilities.LoadScene() object.
     
@@ -311,58 +394,14 @@ def loadIndices(scene, md = None, normalisation_type = 'none', reference_scene =
     '''
     
     if scene.image_type == 'S2':
-        indices = loadS2(scene, md = md, normalisation_type = normalisation_type, reference_scene = reference_scene)
+        indices = _loadS2(scene, md = md)
     elif scene.image_type == 'S1dual' and force_S1single == False:
-        indices = loadS1Dual(scene, md = md, normalisation_type = normalisation_type, reference_scene = reference_scene)
+        indices = _loadS1Dual(scene, md = md)
     else:
-        indices = loadS1Single(scene, md = md, normalisation_type = normalisation_type, reference_scene = reference_scene)
+        indices = _loadS1Single(scene, md = md)
     
     return indices
 
-
-def _createGdalDataset(md, data_out = None, filename = '', driver = 'MEM', dtype = 3, RasterCount = 1, nodata = None, options = []):
-    '''
-    Function to create an empty gdal dataset with georefence info from metadata dictionary.
-
-    Args:
-        md: Object from Metadata() class.
-        data_out: Optionally specify an array of data to include in the gdal dataset.
-        filename: Optionally specify an output filename, if image will be written to disk.
-        driver: GDAL driver type (e.g. 'MEM', 'GTiff'). By default this function creates an array in memory, but set driver = 'GTiff' to make a GeoTiff. If writing a file to disk, the argument filename must be specified.
-        dtype: Output data type. Default data type is a 16-bit unsigned integer (gdal.GDT_Int16, 3), but this can be specified using GDAL standards.
-        options: A list containing other GDAL options (e.g. for compression, use [compress='LZW'].
-
-    Returns:
-        A GDAL dataset.
-    '''
-    from osgeo import gdal, osr
-        
-    gdal_driver = gdal.GetDriverByName(driver)
-    ds = gdal_driver.Create(filename, md.ncols, md.nrows, RasterCount, dtype, options = options)
-    
-    ds.SetGeoTransform(md.geo_t)
-    
-    proj = osr.SpatialReference()
-    proj.ImportFromEPSG(md.EPSG_code)
-    ds.SetProjection(proj.ExportToWkt())
-    
-    # If a data array specified, add data to the gdal dataset
-    if type(data_out).__module__ == np.__name__:
-        
-        if len(data_out.shape) == 2:
-            data_out = np.ma.expand_dims(data_out,2)
-        
-        for feature in range(RasterCount):
-            ds.GetRasterBand(feature + 1).WriteArray(data_out[:,:,feature])
-            
-            if nodata != None:
-                ds.GetRasterBand(feature + 1).SetNoDataValue(nodata)
-    
-    # If a filename is specified, write the array to disk.
-    if filename != '':
-        ds = None
-    
-    return ds
 
 def loadModel(image_type):
     '''
@@ -385,20 +424,6 @@ def loadModel(image_type):
     clf = joblib.load(filename) 
        
     return clf
-
-
-def _classifyChunk(input_list):
-    '''
-    '''
-    
-    chunks = input_list[0]
-    i = input_list[1]
-    print str(i)
-    try:
-        out = clf.predict_proba(X[i::chunks,:])[:,1]
-    except:
-        out = np.zeros_like(X[i::chunks,0]) + 0.5 # In case nodata
-    return out
 
 
 def classify(data, image_type, nodata = 255):
@@ -444,26 +469,20 @@ def classify(data, image_type, nodata = 255):
     
     p_forest = np.ma.array(p_forest, mask = mask, fill_value = 255)
     
-    #chunks = 100
-    #instances = multiprocessing.Pool(25)
-    #y_pred = instances.map(_classifyChunk, [[chunks, i] for i in range(chunks)])
-    #instances.close()
-    
-    # Extract pixel predictions, and place on the map
-    #for i,y in enumerate(y_pred):
-    #    p_forest[i::chunks] = np.round((y * 100.),0).astype(np.uint8)
-    
-    #p_forest_out = np.zeros((data_shape[0], data_shape[1]), dtype = np.uint8)
-    #p_forest_out[mask == False] = p_forest
-    
-    #p_forest_out = np.ma.array(p_forest_out,mask = mask, fill_value = 255)
-    
     return p_forest
-    
-         
+
 
 def getOutputName(scene, output_dir = os.getcwd(), output_name = 'classified'):
     '''
+    Build a standardised image output name
+    
+    Args:
+        scene: A sen2mosaic.utilities.LoadScene() object
+        output_dir: Output directory, defaults to current working directory
+        output_name: A string to prepend to the output images.
+    
+    Returns:
+        Path to the output file
     '''
     
     output_dir = output_dir.rstrip('/')
@@ -473,56 +492,12 @@ def getOutputName(scene, output_dir = os.getcwd(), output_name = 'classified'):
     return output_name
 
 
-
-def loadScenes(source_files, md = None, sort = True):
-    '''
-    Load and sort input scenes (Sentinel-1 or Sentinel-2).
-    
-    Args:
-        source_files: 
-        md: 
-        sort: Set True to sort files by date
-    
-    Returns: 
-        A list of scenes of class utilitiesLoadScene()
-    '''
-    
-    def getS2Res(resolution):
-        '''
-        '''
-        
-        if float(resolution) < 60:
-            return 20
-        else:
-            return 60
-    
-    # Load scenes
-    scenes = []
-    for source_file in source_files:
-        try:
-            scenes.append(sen2mosaic.utilities.LoadScene(source_file, resolution = getS2Res(md.res)))
-        except AssertionError:
-            continue
-        except IOError:
-            try:
-                scenes.append(sen1mosaic.utilities.LoadScene(source_file))
-            except:
-                print 'WARNING: Failed to load scene: %s'%source_file.filename
-                continue
-    
-    if md is not None:
-        # Remove scenes that aren't within output extent
-        scenes = sen2mosaic.utilities.getSourceFilesInTile(scenes, md)
-    
-    # Sort by date
-    if sort:
-        scenes = [scene for _,scene in sorted(zip([s.datetime.date() for s in scenes],scenes))]
-    
-    return scenes
-
-
 def _classify_all(input_list):
     '''
+    Multiprocessing requires some gymnastics. This is a wrapper function to exexute classify_all() using a single input expressed as a list.
+    
+    Args:
+        input_list: List containing [source_file, target_extent, resolution, EPSG_code, output_dir, output_name]
     '''
     
     source_file = input_list[0]
@@ -531,60 +506,69 @@ def _classify_all(input_list):
     EPSG_code = input_list[3]
     output_dir = input_list[4]
     output_name = input_list[5]
-    
-    print 'Res: %s, %s'%(str(resolution), source_file)
-    
+        
     md_dest = sen2mosaic.utilities.Metadata(target_extent, resolution, EPSG_code)
-    scene = loadScenes([source_file], md = md_dest, sort = True)[0]
+    scene = loadScenes(source_file, md = md_dest, sort = True)
     
-    try:
-        print 'Doing %s'%scene.filename
-        indices = loadIndices(scene, md = md_dest, normalisation_type = 'local')
-    except:
-        print 'Error loading %s'%scene.filename
-        return 0.
-    
-    p_forest = classify(indices, scene.image_type)
-    
-    # Save data to disk
-    ds = sen2mosaic.utilities.createGdalDataset(md_dest, data_out = p_forest.filled(255), filename = getOutputName(scene, output_dir = output_dir, output_name = output_name), nodata = 255, driver='GTiff', dtype = gdal.GDT_Byte, options=['COMPRESS=LZW'])
-    
-    return p_forest
+    classify_all(scene, md_dest, output_dir = output_dir, output_name = output_name)
     
 
-def main(source_files, target_extent, resolution, EPSG_code, output_dir = os.getcwd(), output_name = 'classified'):
-    """
-    """
-       
-    md_dest = sen2mosaic.utilities.Metadata(target_extent, resolution, EPSG_code)
-    scenes = loadScenes(source_files, md = md_dest, sort = True)
-       
-    #_classify_all([[scene.filename, target_extent, resolution, EPSG_code, output_dir, output_name] for scene in scenes][0])
+def classify_all(scenes, md_dest, output_dir = os.getcwd(), output_name = 'classified'):
+    '''
+    Classify a list of Sentinel-2 scenes
     
-    instances = multiprocessing.Pool(25)
-    p_forest = instances.map(_classify_all, [[scene.filename, target_extent, resolution, EPSG_code, output_dir, output_name] for scene in scenes])
-    instances.close()
+    Args:
+        scenes: A list of scenes, of type sen2mosaic.utilites.LoadScene()
+        md_dest: Destination image metadata, of type sen2mosaic.utilites.Metadata()
+    '''
     
-    """
-    # Determine output extent and projection
-    md_dest = sen2mosaic.utilities.Metadata(target_extent, resolution, EPSG_code)
+    # Allow for the processing of one scene or list of scenes.
+    if type(scenes) != list: scenes = [scenes]
     
-    # Load and sort input scenes
-    scenes = loadScenes(source_files, md = md_dest, sort = True)
-    
-    for n, scene in enumerate(scenes):
-        print 'Doing %s'%scene.filename.split('/')[-1]
+    for scene in scenes:
         
-        # Load data
-        indices = loadIndices(scene, md = md_dest, normalisation_type = 'local')#, reference_scene = reference_scenes[inds[n]])
+        try:
+            print 'Doing %s'%scene.filename
+            indices = loadIndices(scene, md = md_dest)
+        except:
+            print 'Error loading %s'%scene.filename
         
-        # Classify to probability of forest
+        # Classify the image
         p_forest = classify(indices, scene.image_type)
         
-         # Save data to disk
-        ds = sen2mosaic.utilities.createGdalDataset(md_dest, data_out = p_forest.data, filename = getOutputName(scene, output_dir = output_dir, output_name = output_name), driver='GTiff', dtype = gdal.GDT_Byte, options=['COMPRESS=LZW'])
-    """
+        # Save data to disk
+        ds = sen2mosaic.utilities.createGdalDataset(md_dest, data_out = p_forest.filled(255), filename = getOutputName(scene, output_dir = output_dir, output_name = output_name), nodata = 255, driver='GTiff', dtype = gdal.GDT_Byte, options=['COMPRESS=LZW'])
+        
 
+def main(source_files, target_extent, resolution, EPSG_code, n_processes = 1, output_dir = os.getcwd(), output_name = 'classified'):
+    """
+    Classify a list of Sentinel-2 input files to forest/nonforest probabilities, reproject and output to GeoTiffs.
+    
+    Args:
+        source_files: A list of directories for Sentinel-2 input tiles. 
+        target_extent: Extent of search area, in format [xmin, ymin, xmax, ymax]
+        resolution: Resolution to re-sample search area, in meters. Best to be 10 m, 20 m or 60 m to match Sentinel-2 resolution.
+        EPSG_code: EPSG code of search area.
+        n_processes: Number of processes, defaults to 1.
+        output_dir: Directory to output classifier predictors. Defaults to current working directory.
+        output_name: Name to precede output file. Defaults to 'processed'. 
+        
+    """
+    
+    # Load scene metadata
+    md_dest = sen2mosaic.utilities.Metadata(target_extent, resolution, EPSG_code)
+    scenes = loadScenes(source_files, md = md_dest, sort = True)
+    
+    # Classify
+    if n_processes == 1:
+        classify_all(scenes, md_dest)
+    
+    # Classify in parallel
+    elif n_processes > 1:
+        instances = multiprocessing.Pool(n_processes)
+        instances.map(_classify_all, [[scene.filename, target_extent, resolution, EPSG_code, output_dir, output_name] for scene in scenes])
+        instances.close()
+    
 
 if __name__ == '__main__':
     '''
@@ -604,6 +588,7 @@ if __name__ == '__main__':
     
     # Optional arguments
     optional.add_argument('infiles', metavar = 'FILES', type = str, default = [os.getcwd()], nargs = '*', help = 'Sentinel 2 input files (level 2A) in .SAFE format, Sentinel-1 input files in .dim format, or a mixture. Specify one or more valid Sentinel-2 .SAFE, a directory containing .SAFE files, or multiple granules through wildcards (e.g. *.SAFE/GRANULE/*). Defaults to processing all granules in current working directory.')
+    optional.add_argument('-p', '--n_processes', type = int, metavar = 'N', default = 1, help = "Maximum number of tiles to process in paralell. Bear in mind that more processes will require more memory. Defaults to 1.")
     optional.add_argument('-o', '--output_dir', type=str, metavar = 'DIR', default = os.getcwd(), help="Optionally specify an output directory")
     optional.add_argument('-n', '--output_name', type=str, metavar = 'NAME', default = 'CLASSIFIED', help="Optionally specify a string to precede output filename.")
     
@@ -615,10 +600,10 @@ if __name__ == '__main__':
     
     # Find files from input directory/granule etc.
     infiles_S2 = sen2mosaic.utilities.prepInfiles(infiles, '2A')
-    infiles_S1 = sen1mosaic.utilities.prepInfiles(infiles)
     
     # Execute script
-    main(infiles_S2 + infiles_S1, args.target_extent, args.resolution, args.epsg, output_dir = args.output_dir, output_name = args.output_name)
+    main(infiles_S2, args.target_extent, args.resolution, args.epsg,n_processes = args.n_processes, output_dir = args.output_dir, output_name = args.output_name)
     
+    # Examples
     #~/anaconda2/bin/python ~/DATA/deforest/deforest/classify.py ../chimanimani/L2_files/S1 -r 60 -e 32736 -te 499980 7790200 609780 7900000 -n S1_test
     #~/anaconda2/bin/python ~/DATA/deforest/deforest/classify.py ../chimanimani/L2_files/S2/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -n S2_test

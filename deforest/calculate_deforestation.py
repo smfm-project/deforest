@@ -83,7 +83,7 @@ def bayesUpdate(prior, likelihood):
 
 
 
-def calculateDeforestation(infiles):
+def calculateDeforestation(infiles, deforestation_threshold = 0.995):
     '''
     '''
     
@@ -183,7 +183,7 @@ def calculateDeforestation(infiles):
         pchange[s] = 0.
         
         # Case B: Confirm warning where pchange > chi (hardwired to 99 %)
-        s = np.logical_and(np.logical_and(np.logical_and(warning == True, pchange > 0.99), deforestation == False), mask == False)
+        s = np.logical_and(np.logical_and(np.logical_and(warning == True, pchange > deforestation_threshold), deforestation == False), mask == False)
         deforestation[s] = True
                 
         # Update flag for next round:

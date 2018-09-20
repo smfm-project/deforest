@@ -323,8 +323,8 @@ def _unpackOutputs(outputs):
     forest_px, nonforest_px = [], []
     
     for f, nf in outputs:
-        forest_px.append(f)
-        nonforest_px.append(nf)
+        forest_px.extend(f)
+        nonforest_px.extend(nf)
     
     return forest_px, nonforest_px
     
@@ -356,6 +356,7 @@ def extractData(scenes, training_data, md_dest, forest_values, nonforest_values,
             indices = classify.loadIndices(scene, md = md_dest)
         except:
             print 'Missing data, continuing'
+            continue
         
         if training_data.split('.')[-1] == 'shp':
             forest_mask = loadShapefile(training_data, md_dest, attribute = attribute_name, attribute_value = forest_values)
@@ -366,8 +367,8 @@ def extractData(scenes, training_data, md_dest, forest_values, nonforest_values,
             nonforest_mask = loadRaster(training_data, md_dest, nonforest_values)
         
         # Get random subset of pixels
-        forest.append(_getPixels(indices, forest_mask, subset = subset))
-        nonforest.append(_getPixels(indices, nonforest_mask, subset = subset))
+        forest.extend(_getPixels(indices, forest_mask, subset = subset))
+        nonforest.extend(_getPixels(indices, nonforest_mask, subset = subset))
     
     return forest, nonforest
 
@@ -406,6 +407,7 @@ def main(source_files, target_extent, resolution, EPSG_code, training_data, fore
     # Extract pixels by multi-processing
     else:
         instances = multiprocessing.Pool(n_processes)
+        
         forest_px, nonforest_px = _unpackOutputs(instances.map(_extractData, [[scene.filename, training_data, target_extent, resolution, EPSG_code, forest_values, nonforest_values, attribute_name, max_pixels] for scene in scenes]))
         instances.close()
         
