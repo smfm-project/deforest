@@ -206,7 +206,7 @@ def calculateDeforestation(infiles, deforestation_threshold = 0.99, block_weight
         # If multiple observations from the same date exist, combine them (not performed where only one observation)
         if image_types.shape[0] > 1:
             PNF, mask = _combineObservations(PNF, mask)
-          
+        
         ##################################
         # Step 1: Flag potential changes #
         ##################################
@@ -237,7 +237,7 @@ def calculateDeforestation(infiles, deforestation_threshold = 0.99, block_weight
         
         # Tidy up
         deforestation_date[sel] = dt.date(1970,1,1)
-        pchange[s] = 0.
+        pchange[sel] = 0.
         
         # Case B: Confirm warning where pchange > deforestation_threshold
         sel = warning & (deforestation == False) & (pchange >= deforestation_threshold) & (mask == False)
