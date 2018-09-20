@@ -377,7 +377,7 @@ def _loadS2(scene, md = None):
 
     # Tidy up residual nodata values
     features[np.logical_or(np.isinf(features), np.isnan(features))] = 0.
-    print 'Done'
+    
     return features
 
 

@@ -249,7 +249,6 @@ def main(data, max_samples = 100000, output_dir = _getCfgDir()):
     
 
 if __name__ == '__main__':
-    
     '''
     Script to train a Random Forest model to classify S2 images into forest/nonforest probabilities.
     Returns a calibrated model and QA graphics.
