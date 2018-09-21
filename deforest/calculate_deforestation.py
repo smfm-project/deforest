@@ -172,6 +172,9 @@ def calculateDeforestation(infiles, deforestation_threshold = 0.99, block_weight
     # For each date in turn
     for date in sorted(np.unique(dates)):
         
+        # Possible future functionality to not consider some months with poor data quality.
+        #if date.astype('datetime64[M]').astype(int) % 12 + 1 in [10,11]: continue
+        
         # Get unique image types (max one measurement per pixel per sensor per day permitted)
         image_types = np.unique(image_type[dates == date])
         
