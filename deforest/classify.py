@@ -60,6 +60,7 @@ def loadScenes(source_files, md = None, sort = True):
     # Load scenes
     scenes = []
     for source_file in source_files:
+        
         try:
             scenes.append(sen2mosaic.utilities.LoadScene(source_file, resolution = getS2Res(md.res)))
         except AssertionError:
@@ -308,7 +309,7 @@ def _loadS2(scene, md = None):
     else:
         B08 = scene.getBand('B8A', md = md)[mask == False] / 10000.
     
-    B01 = scene.getBand('B01', md = md)[mask == False] / 10000.
+    #B01 = scene.getBand('B01', md = md)[mask == False] / 10000. # Removed, as necessitates 60 m processing
     B05 = scene.getBand('B05', md = md)[mask == False] / 10000.
     B06 = scene.getBand('B06', md = md)[mask == False] / 10000.
     
@@ -340,7 +341,7 @@ def _loadS2(scene, md = None):
         features[:,:,5][mask == False] = (B06 - B05) / (B05 + B06) #(2 * B01)
         
         # SIPI (vegetation)
-        features[:,:,6][mask == False] = (B08 - B01) / (B08 - B04) 
+        # features[:,:,6][mask == False] = (B08 - B01) / (B08 - B04) 
         
         # NBR (fire)
         features[:,:,7][mask == False] = (B08 - B12) / (B08 + B12)
@@ -558,6 +559,9 @@ def main(source_files, target_extent, resolution, EPSG_code, n_processes = 1, ou
     
     # Catch case of single source_file input
     if type(source_files) != list: source_files = [source_files]
+    
+    # Check that files are input
+    assert len(source_files) > 0, "No source files found at input location."
     
     # Get absolute path of input files.
     source_files = [os.path.abspath(i) for i in source_files]

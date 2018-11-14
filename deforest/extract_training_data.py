@@ -19,7 +19,7 @@ import sen2mosaic.utilities
 import classify
 
 import pdb
-
+import traceback
 
 def loadShapefile(shp, md_dest, attribute = '', attribute_values = ''):
     """
@@ -218,7 +218,7 @@ def loadRaster(raster, md_dest, classes):
     md_source = sen2mosaic.utilities.Metadata(extent, xres, EPSG)
     
     # Build an empty destination dataset
-    ds_dest = sen2mosaic.utilities.createGdalDataset(md_dest,dtype = 1)
+    ds_dest = sen2mosaic.utilities.createGdalDataset(md_dest, nodata = ds_source.GetRasterBand(1).GetNoDataValue(), dtype = 1)
     
     # And reproject landcover dataset to match input image
     landcover = np.squeeze(sen2mosaic.utilities.reprojectImage(ds_source, ds_dest, md_source, md_dest))
@@ -355,6 +355,7 @@ def extractData(scenes, training_data, md_dest, forest_values, nonforest_values,
         try:
             indices = classify.loadIndices(scene, md = md_dest)
         except:
+            traceback.print_exc()
             print 'Missing data, continuing'
             continue
         
@@ -365,7 +366,7 @@ def extractData(scenes, training_data, md_dest, forest_values, nonforest_values,
         elif training_data.split('.')[-1] in ['tif', 'tiff', 'vrt']:
             forest_mask = loadRaster(training_data, md_dest, forest_values)
             nonforest_mask = loadRaster(training_data, md_dest, nonforest_values)
-        
+                
         # Get random subset of pixels
         forest.extend(_getPixels(indices, forest_mask, subset = subset))
         nonforest.extend(_getPixels(indices, nonforest_mask, subset = subset))
