@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 
-from sklearn.cross_validation import train_test_split
+from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.externals import joblib
 
@@ -17,48 +17,6 @@ def _getCfgDir():
     '''
     
     return '/'.join(os.path.dirname(os.path.realpath(__file__)).split('/')[:-1]) + '/cfg/'
-
-
-def _undersampleArray(array1, array2):
-    '''
-    Function to randomly undersample an array to match the size of the larger array.
-    
-    Args:
-        array1: A numpy array.
-        array2: Another numpy array.
-        
-    Returns:
-        array1 and array2, with the larger input array resampled to the size of the smaller array.
-    '''
-
-    assert array1.ndim == 1 or array1.ndim == 2, "Input arrays must have either one or two dimensions. array1 has %s dimensions"%str(array1.ndim)
-    assert array2.ndim == 1 or array2.ndim == 2, "Input arrays must have either one or two dimensions. array2 has %s dimensions"%str(array2.ndim)
-    assert array1.ndim == 1 or array1.ndim == 2, "Input arrays must have the same number of dimensions. array1 has %s dimensions and array2 has %s dimensions."%(str(array1.ndim), str(array2.ndim))
-
-    # Determine which array is larger
-    if array1.shape[0] > array2.shape[0]:
-        larger_array = array1
-        smaller_array = array2
-    elif array1.shape[0] <= array2.shape[0]:
-        larger_array = array2
-        smaller_array = array2
-
-    # Randomly resample it
-    s = np.arange(larger_array.shape[0])
-    np.random.shuffle(s)
-
-    if larger_array.ndim == 2:
-        larger_array_subsample = larger_array[s < smaller_array.shape[0], :]
-    else:
-        larger_array_subsample = larger_array[s < smaller_array.shape[0]]
-
-    # Rename the subsampled array to the input names
-    if array1.shape[0] > array2.shape[0]:
-        array1 = larger_array_subsample
-    elif array2.shape[0] <= array2.shape[0]:
-        array2 = larger_array_subsample
-
-    return array1, array2
 
 
 
@@ -84,9 +42,6 @@ def fitModel(forest_px, nonforest_px, output_name, max_pixels = 100000, output_Q
     '''
     '''
         
-    # Balance data by undersampling the larger class
-    #forest_px, nonforest_px = _undersampleArray(forest_px, nonforest_px)
-    
     # Randomise sample
     np.random.shuffle(forest_px); np.random.shuffle(nonforest_px)
     
@@ -102,7 +57,6 @@ def fitModel(forest_px, nonforest_px, output_name, max_pixels = 100000, output_Q
     
     # Split into training and test datasets
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.5, random_state = 42)
-    #X_test1, X_test2, y_test1, y_test2 = train_test_split(X, y, test_size = 0.5, random_state = 42)
     
     # Fir the random forest model.
     clf = RandomForestClassifier(random_state = 42, n_estimators = 100, class_weight = 'balanced')

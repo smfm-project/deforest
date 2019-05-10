@@ -186,7 +186,7 @@ def calculateDeforestation(infiles, deforestation_threshold = 0.99, block_weight
             # Build a single composite p_forest image for each image type per date
             for infile in infiles[np.logical_and(dates == date, image_type == this_image_type)]:
                     
-                print 'Loading %s'%infile
+                print('Loading %s'%infile)
                 data = gdal.Open(infile,0).ReadAsArray()
                 
                 # Select areas that still have the nodata value
@@ -195,7 +195,7 @@ def calculateDeforestation(infiles, deforestation_threshold = 0.99, block_weight
                 # Paste the new data into these locations
                 PF[:,:,n][s] = data[s]
         
-        # Change percent probability of forest to probability of non forest
+        # Change percent probability of forest (PF) to probability of non forest (PNF)
         PNF = (100 - PF) / 100.
         mask = PF == 255
         
@@ -279,8 +279,7 @@ def outputImage(array, image_like, filename):
     ds.SetProjection(data_ds.GetProjection())
     ds.GetRasterBand(1).WriteArray(array)
     ds = None
-        
-        
+    
     
 def main(source_files, deforestation_threshold = 0.99, block_weight = 0.1, output_dir = os.getcwd(), output_name = 'OUTPUT'):
     '''
