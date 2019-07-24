@@ -3,6 +3,7 @@ import argparse
 import csv
 import datetime
 import glob
+import joblib
 import math
 import matplotlib.pyplot as plt
 import multiprocessing
@@ -14,7 +15,7 @@ import skimage.exposure
 
 import deforest.feature
 
-import sen2mosaic
+import sen2mosaic.core
 import sen2mosaic.IO
 
 #import sen1mosaic.utilities
@@ -27,8 +28,23 @@ global X # Feature array
 global clf # Model
 
 
+####################################
+### Function for file management ###
+####################################
 
-def loadS2(scene, md = None):
+def getCfgDir():
+    '''
+    Returns the directory of the cfg directory to output model coefficients.
+    '''
+    
+    return '/'.join(os.path.dirname(os.path.realpath(__file__)).split('/')[:-1]) + '/cfg/'
+
+####################
+### Functions... ###
+####################
+
+
+def loadFeatures(scene, md = None):
     """
     Calculate a range of vegetation features given .SAFE file and resolution.
     
@@ -74,29 +90,7 @@ def loadS2(scene, md = None):
     return features
 
 
-def loadIndices(scene, md = None, force_S1single = False):
-    '''
-    Load indices from a Sentinel-1 or Sentinel-2 utilities.LoadScene() object.
-    
-    Args:
-        scene: 
-        md_dest:
-        force_S1single: Force the loading of only a single band from Sentinel-1, even where dual polarised
-    Returns:
-        A numpy array
-    '''
-    
-    if scene.image_type == 'S2':
-        indices = loadS2(scene, md = md)
-    elif scene.image_type == 'S1dual' and force_S1single == False:
-        indices = _loadS1Dual(scene, md = md)
-    else:
-        indices = _loadS1Single(scene, md = md)
-    
-    return indices
-
-
-def loadModel(image_type):
+def loadModel(model_name):
     '''
     Loads logistic regression coefficients from config .csv file.
     
@@ -111,15 +105,15 @@ def loadModel(image_type):
     directory = os.path.dirname(os.path.abspath(__file__))
     
     # Determine name of output file
-    filename = '%s/cfg/%s_model.pkl'%('/'.join(directory.split('/')[:-1]),image_type)
+    filename = '%s/%s_model.pkl'%(getCfgDir(),model_name)
     
-    from sklearn.externals import joblib
+    # Load
     clf = joblib.load(filename) 
        
     return clf
 
 
-def classify(data, image_type, nodata = 255):
+def classify(data, model_name, nodata = 255):
     """
     Calculate the probability of forest
     
@@ -131,12 +125,10 @@ def classify(data, image_type, nodata = 255):
     Returns:
         A numpy array containing probability of a pixel being forest in that view. Units are percent, with a nodata value set to nodata.
     """
-    
-    assert image_type in ['S2', 'S1single', 'S1dual'], "image_type must be one of 'S2', 'S1single', or 'S1dual'. The classify() function was given %s."%image_type
-        
+            
     #coefs, means, scales = loadCoefficients(image_type)
     
-    clf = loadModel(image_type)
+    clf = loadModel(model_name)
         
     if data.ndim == 2:
         data = np.ma.expand_dims(data, 2)
@@ -181,13 +173,13 @@ def getOutputName(scene, output_dir = os.getcwd(), output_name = 'classified'):
     output_dir = output_dir.rstrip('/')
     
     output_name = '%s/%s_%s_%s_%s_%s.tif'%(output_dir, output_name, scene.image_type, scene.tile, datetime.datetime.strftime(scene.datetime, '%Y%m%d'), datetime.datetime.strftime(scene.datetime, '%H%M%S'))
-
+    
     return output_name
 
 
 def _classify_all(input_list):
     '''
-    Multiprocessing requires some gymnastics. This is a wrapper function to exexute classify_all() using a single input expressed as a list.
+    Multiprocessing requires some gymnastics. This is a wrapper function to execute classify_all() using a single input expressed as a list.
     
     Args:
         input_list: List containing [source_file, target_extent, resolution, EPSG_code, output_dir, output_name]
@@ -206,7 +198,7 @@ def _classify_all(input_list):
     
     #scene = sen2mosaic.IO.loadSceneList([source_file], resolution = res_S2, md_dest = md_dest, sort_by = 'date')
     
-    scene = sen2mosaic.LoadScene(source_file, resolution = res_s2)
+    scene = sen2mosaic.core.LoadScene(source_file, resolution = res_s2)
     
     
     #scene = loadScenes(source_file, md = md_dest, sort = True)
@@ -214,7 +206,7 @@ def _classify_all(input_list):
     classify_all([scene], md_dest, output_dir = output_dir, output_name = output_name)
 
 
-def classify_all(scenes, md_dest, output_dir = os.getcwd(), output_name = 'classified'):
+def classify_all(scenes, md_dest, model_name = 'S2', output_dir = os.getcwd(), output_name = 'classified'):
     '''
     Classify a list of Sentinel-2 scenes
     
@@ -230,13 +222,13 @@ def classify_all(scenes, md_dest, output_dir = os.getcwd(), output_name = 'class
         
         try:
             print('Doing %s'%scene.granule)
-            indices = loadIndices(scene, md = md_dest)
+            indices = loadFeatures(scene, md = md)
         except:
             print('Error loading %s'%scene.granule)
             continue
             
         # Classify the image
-        p_forest = classify(indices, scene.image_type)
+        p_forest = classify(indices, model_name)
         
         # Save data to disk
         ds = sen2mosaic.IO.createGdalDataset(md_dest, data_out = p_forest.filled(255), filename = getOutputName(scene, output_dir = output_dir, output_name = output_name), nodata = 255, driver='GTiff', dtype = gdal.GDT_Byte, options=['COMPRESS=LZW'])
