@@ -9,7 +9,12 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.externals import joblib
 
+from deforest.classify import getCfgDir
+
 import pdb
+
+
+
 
 
 ####################################
@@ -102,14 +107,6 @@ def _buildQAPlot(clf, X_test, y_test, output_name, output_dir = getCfgDir()):
 ######################
 ### Main functions ###
 ######################
-
-def getCfgDir():
-    '''
-    Returns the directory of the cfg directory to output model coefficients.
-    '''
-    
-    return '/'.join(os.path.dirname(os.path.realpath(__file__)).split('/')[:-1]) + '/cfg/'
-
 
 
 def loadData(data):

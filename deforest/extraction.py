@@ -1,5 +1,6 @@
 import argparse
 import csv
+import multiprocessing
 import numpy as np
 import os
 import random
@@ -13,7 +14,7 @@ import pdb
 import traceback
 
 
-def _outputData(forest_px, nonforest_px, output_name = 'S2', output_dir = os.getcwd()):
+def _outputData(forest_px, nonforest_px, output_name = 'S2', output_dir = None, verbose = False):
     """
     Save data to a .npz file for analysis in model fitting script.
     
@@ -24,12 +25,24 @@ def _outputData(forest_px, nonforest_px, output_name = 'S2', output_dir = os.get
         output_dir: Directory to output .npz file. Defaults to current working directory.
     """
     
+    # Ensure that px are formatted as arrays
     forest_px = np.array(forest_px)
     nonforest_px = np.array(nonforest_px)
     
+    # Find output directory
+    if output_dir == None:
+        output_dir = os.path.dirname(os.path.realpath(__file__))
+    
+    # Test that it's possible to output
+    assert os.path.exists(output_dir), "output_dir does not exist. output_dir is set to: %s"%output_dir
+    assert os.access(output_dir, os.W_OK | os.X_OK), "output_dir does not have write access. output_dir is set to: %s."%output_dur
+    
+    # Save
     np.savez('%s/%s_training_data.npz'%(output_dir, output_name), forest_px = forest_px, nonforest_px = nonforest_px) 
     
-    print('Done!')
+    if verbose: print('Done!')
+    
+    return '%s/%s_training_data.npz'%(output_dir, output_name)
 
 
 def _extractData(input_list):
@@ -137,7 +150,7 @@ def extractData(scenes, training_data, md_dest, forest_values, nonforest_values,
         
         # Initiate extractData with multiprocessing
         instances = multiprocessing.Pool(n_processes)
-        results = instances.map(_extractData, [[scene.granule, scene.resolution, training_data, target_extent, resolution, EPSG_code, forest_values, nonforest_values, field_name, max_pixels, verbose] for scene in scenes])
+        results = instances.map(_extractData, [[scene.granule, scene.resolution, training_data, md_dest.extent, md_dest.res, md_dest.EPSG_code, forest_values, nonforest_values, field, subset, verbose] for scene in scenes])
         instances.close()
         
         # Unpack outputs to usable form
@@ -155,7 +168,7 @@ def extractData(scenes, training_data, md_dest, forest_values, nonforest_values,
                             
             # Get indices
             try:
-                indices = deforest.classify.loadIndices(scene, md = md_dest)
+                indices = deforest.classify.loadFeatures(scene, md = md_dest)
             except:
                 traceback.print_exc()
                 print('Missing data, continuing')
@@ -178,9 +191,9 @@ def extractData(scenes, training_data, md_dest, forest_values, nonforest_values,
             forest.extend(_getPixels(indices, forest_mask, subset = subset))
             nonforest.extend(_getPixels(indices, nonforest_mask, subset = subset))
 
-    # Output data (currently only outputs S2)    
+    # Output data    
     if output:
-        _outputData(forest_px, nonforest_px, output_name = output_name, output_dir = output_dir)
+        _outputData(forest, nonforest, output_name = output_name, output_dir = output_dir)
     
     return forest, nonforest
 
