@@ -95,20 +95,19 @@ def loadModel(model_name):
     Loads logistic regression coefficients from config .csv file.
     
     Args:
-        image_type: A string wih the image type (i.e. S1single, S1dual, S2)
+        model_name: Path to a model.pkl file from training.py
     Returns:
-        An array containing model coefficients, the first element being the intercept, and remaining elements coefficients in layer order.
-        Arrays containing the mean and scaling parameters to transform the imput image.
+        A scikit-learn Random Forest model
     '''
     
     # Get location of current file
-    directory = os.path.dirname(os.path.abspath(__file__))
+    #directory = os.path.dirname(os.path.abspath(__file__))
     
     # Determine name of output file
-    filename = '%s/%s_model.pkl'%(getCfgDir(),model_name)
+    #filename = '%s/%s_model.pkl'%(getCfgDir(),model_name)
     
     # Load
-    clf = joblib.load(filename) 
+    clf = joblib.load(model_name) 
        
     return clf
 

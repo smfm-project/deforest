@@ -1,4 +1,5 @@
 import argparse
+import os
 
 import deforest.training
 
@@ -49,16 +50,19 @@ if __name__ == '__main__':
     # Optional arguments
     optional.add_argument('-m', '--max_samples', type = int, metavar = 'N', default = 100000, help = "Maximum number of samples to train the classifier with. Smaller sample sizes will run faster and produce a simpler model, possibly at the cost of predictive power.")
     optional.add_argument('-n', '--output_name', type=str, metavar = 'NAME', default = None, help="Specify a string to precede output filename. Defaults to name of input training data.")
-    optional.add_argument('-o', '--output_dir', type = str, metavar = 'PATH', default = deforest.training.getCfgDir(), help = "Directory to save the classifier. Defaults to the deforest/cfg directory.")
+    optional.add_argument('-o', '--output_dir', type = str, metavar = 'PATH', default = os.getcwd(), help = "Directory to save the classifier. Defaults to the current working directory.")
         
     # Get arguments
     args = parser.parse_args()
     
-    if args.output_name is None: output_name = '_'.join(args.data.split('_')[:-2])
+    if args.output_name is None:
+        output_name = '_'.join(args.data.split('_')[:-2])
+    else:
+        output_name = args.output_name
     
     # Execute script
     main(args.data, max_samples = args.max_samples, output_name = output_name, output_dir = args.output_dir)
     
     # Example:
     # 
-    #deforest train S2_training_data.npz
+    # deforest train S2_training_data.npz

@@ -1,13 +1,13 @@
 import argparse
 import csv
 import itertools
+import joblib
 import matplotlib.pyplot as plt
 import numpy as np
 import os
 
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.externals import joblib
 
 from deforest.classify import getCfgDir
 
