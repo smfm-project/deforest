@@ -6,23 +6,21 @@
 Welcome to deforest's documentation!
 ====================================
 
-This processing chain is under construction. It will:
+The DEnse FOREst Time Series (DEFOREST) tool is a method for detecting changes in forest cover in a time series of Sentinel-2 data.
 
-* Take pre-processed Sentinel-1 and Sentinel-2 data as inputs
-* Output maps of forest change
+The processing chain:
+
+* Takes Sentinel-2 data (L1C/L2A) as input.
+* Trains a model to robustly identify forest/nonforest across any phenological state.
+* Classifies each image to a probability of forest cover.
+* Combines these images under a Bayesian framework to identify forest cover change.
+* Outputs maps of forest cover change, and 'early warnings' of change in recent imagery.
 
 Contents:
 ---------
 
 .. toctree::
    :maxdepth: 2
-
-
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
-
+   setup.rst
+   command_line.rst
+   worked_example.rst
