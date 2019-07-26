@@ -114,7 +114,7 @@ def main(source_files, target_extent, resolution, EPSG_code, n_processes = 1, mo
     md_dest = sen2mosaic.core.Metadata(target_extent, resolution, EPSG_code)
     
     # Load a list of scenes
-    scenes = sen2mosaic.IO.loadSceneList(source_files, md_dest = md_dest, level = '2A', sort_by = 'date')
+    scenes = sen2mosaic.IO.loadSceneList(source_files, md_dest = md_dest, level = level, sort_by = 'date')
     
     # Classify
     if n_processes == 1:
