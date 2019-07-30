@@ -5,7 +5,7 @@ Worked example on the command line
 
 Here we'll show you by example how the deforest processing chain works in practice. We will focus on an example from Zambezia province of Mozambique, with the aim of producing a remote sensing product for historic deforestation and near real-time warnings of deforestation.
 
-We'll run this example in Gile, Mozambique, an area covered by Sentinel-2 tile 37LDC. This location has the CRS **UTM 37S** (EPSG: 32737), and an extent of **XXX,XXX - XXX,XXX** m Eastings, and **X,XXX,XXX - X,XXX,XXX** m Eastings. We'll use all data from the start of the Sentinel-2 era to May 2019, the time of writing.
+We'll run this example in the Chimanimani region, covering Zimbabwe and Mozambique. We'll use a dense time series of two Sentinel-2 tiles, **36KWC** and **36KWD**. This location has the CRS **UTM 36S** (EPSG: 32736), and an extent of **400,000 - 600,000** m Eastings, and **7,800,000 - 7,900,000** m Northings. We'll use all data from the start of the Sentinel-2 era to mid-July 2019, the time of writing.
 
 Preparation
 -----------
@@ -42,31 +42,33 @@ The first step is to download Sentinel-2 level 1C data from the `Copernicus Open
 
 For this we use the ``sen2mosaic`` ``download.py`` tool. See [sen2mosaic instructions] for more details.
 
-Here, we'll download all L1C data for the tile ``37LDC`` specifying a maximum cloud cover percetage of 30%:
+Here, we'll download all L2A data for the period 1st July 2018 to 2019 for the tile ``36KWD`` specifying a maximum cloud cover percetage of 30%:
 
 .. code-block:: console
     
-    s2m download -u user.name -p supersecret -t 37LDC -c 30
+    s2m download -u user.name -p supersecret -t 36KWD -c 30 -s 20180701 -l L2A
 
-Wait for all files to finish downloading before proceeding to the next step. By the time the processing is complete, your ``DATA`` directory should contain a series of Sentinel-2 .SAFE files:
+.. note::  Not all Sentinel-2 data are available in L2A format, meaning that you can either use L1C data, or preprocess data yourself with sen2cor. See `sen2mosaic <https://www.bitbucket.org/sambowers/sen2mosaic>`_ for more details.
+
+.. note:: Data from more than 1 year in the past may have been moved to the `Long Term Archive <https://earth.esa.int/web/sentinel/news/-/article/activation-of-long-term-archive-lta-access>`_. To access this data it will be necessary to order it from Copernicus. For more practical purposes, to use dense time series you should consider using these scripts on an online platform (e.g. F-TEP, DIAS, AWS) to access Sentinel-2 data.
+    
+Ensure that you have at least 2 years of data before proceeding to the next step. Ensuere that you have a directory (i.e. ``DATA``) containing a series of Sentinel-2 .SAFE files:
 
 .. code-block:: console
-    
+
+    [user@linuxpc DATA]$ ls
+    S2B_MSIL2A_20170630T072949_N0205_R049_T36KWC_20170630T075509.SAFE
+    S2B_MSIL2A_20170710T072619_N0205_R049_T36KWC_20170710T074330.SAFE
+    S2B_MSIL2A_20170713T075209_N0205_R092_T36KVD_20170713T075751.SAFE
+    S2B_MSIL2A_20170713T075209_N0205_R092_T36KWC_20170713T075751.SAFE
+    S2B_MSIL2A_20170713T075209_N0205_R092_T36KWC_20170713T080544.SAFE
+    S2B_MSIL2A_20170713T075209_N0205_R092_T36KWD_20170713T075751.SAFE
+    S2B_MSIL2A_20170720T074239_N0205_R049_T36KWC_20170720T074942.SAFE
+    S2B_MSIL2A_20170723T073609_N0205_R092_T36KVD_20170723T075425.SAFE
     ...
-    ...
-
-.. note:: If available, you can also download L2A from the Copernicus Open Access Data Hub (using option ``-l 2A``). At the time of writing, this data weren't widely available.    
-    
-Atmopsheric correction and cloud masking
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-
-
-.. code-block:: console
-    
-    ...
-    ...
-
+    S2B_MSIL2A_20190703T073619_N0212_R092_T36KWD_20190703T122423.SAFE
+    S2B_MSIL2A_20190713T073619_N0213_R092_T36KWD_20190713T111309.SAFE
+    S2B_MSIL2A_20190723T073619_N0213_R092_T36KWD_20190723T115930.SAFE
 
 Training the classifier
 -----------------------
@@ -112,21 +114,29 @@ To use this with our existing directory containing Sentinel-2 data, we can use t
 
 .. code-block:: console
     
-    deforest extract path/to/DATA/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t path/to/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -o ./ --max_images 100 -f 1 -nf 2 3 4 5 6 7 8 10 -v
+    deforest extract path/to/DATA/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t path/to/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -o ./ -f 1 -nf 2 3 4 5 6 7 8 10 -v
 
+If resources are limited, input training data can be limited to fewer images:
+
+.. code-block:: console
+    
+    deforest extract path/to/DATA/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t path/to/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -o ./ --max_images 100 -f 1 -nf 2 3 4 5 6 7 8 10 -v
+    
 If resources are available, this process can be sped up by increasing the number of processes to, for instance, to run 8 similtaneous processes:
 
 .. code-block:: console
     
-    deforest extract path/to/DATA/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t path/to/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -o ./ --max_images 100 -f 1 -nf 2 3 4 5 6 7 8 10 -v -p 8
+    deforest extract path/to/DATA/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t path/to/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -o ./ -f 1 -nf 2 3 4 5 6 7 8 10 -v -p 8
 
 Be aware, the more processes used the more computational resources will be required.
+
+
 
 The output of this command will be a ``.npz`` file, which contains the pixel values for each classification feature.
 
 .. code-block:: console
     
-    [user@linuxpc directory] ls
+    [user@linuxpc directory]$ ls
     S2_training_data.npz
 
 Calibrating the classifier
@@ -144,7 +154,7 @@ Once complete there will be two new files
 
 .. code-block:: console
 
-    [user@linuxpc directory] ls
+    [user@linuxpc directory]$ ls
     S2_model.pkl
     S2_quality_assessment.png
 
@@ -157,7 +167,7 @@ First, we'll make a new directory to store classified images:
 
 .. code-block:: console
     
-    [user@linuxpc directory] mkdir classified_images
+    [user@linuxpc directory]$ mkdir classified_images
 
 We can then run the classification algorithm we just calibrated to produce probability of forest for each image. This operates very similarly to ``training.py``, here we'll use the same output extents:
     
@@ -205,7 +215,7 @@ This process will output two images:
 
 .. code-block:: console
     
-    [user@linuxpc directory] ls
+    [user@linuxpc directory]$ ls
     ...
     S2_confirmed.tif
     S2_warning.tif
