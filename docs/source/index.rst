@@ -20,7 +20,9 @@ Contents:
 ---------
 
 .. toctree::
+   :numbered:
    :maxdepth: 2
+   
    setup.rst
    command_line.rst
    worked_example.rst
