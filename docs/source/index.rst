@@ -25,4 +25,4 @@ Contents:
    
    setup.rst
    command_line.rst
-   worked_example.rst
+   worked_example_1.rst
