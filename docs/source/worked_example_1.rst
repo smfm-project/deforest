@@ -5,7 +5,7 @@ Worked example on the command line
 
 Here we'll explain by example how the ``deforest`` processing chain works in practice. We will focus on an example from Manica and Manicaland provinces of Mozambique and Zimbabwe, with the aim of producing a remote sensing product for annual deforestation and near real-time warnings of tree cover change.
 
-The study area for this example straddles the border of Mozambique and Zimbabwe, and is appropriate as it is relatively densely forested, with high rates of forest cover change. We'll use a dense time series of two Sentinel-2 tiles, **36KWC** and **36KWD**. This location has the CRS **UTM 36S** (EPSG: 32736), and an extent of **400,000 - 600,000** m Eastings, and **7,800,000 - 7,900,000** m Northings. We'll use all data from the start of the Sentinel-2 era to mid-July 2019, the time of writing.
+The study area for this example straddles the border of Mozambique and Zimbabwe, and is appropriate as it is relatively densely forested, with high rates of forest cover change. We'll use a dense time series of two Sentinel-2 tiles, **36KVD** and **36KWD**. This location has the CRS **UTM 36S** (EPSG: 32736), and an extent of **400,000 - 600,000** m Eastings, and **7,800,000 - 7,900,000** m Northings. We'll use all data from the start of the Sentinel-2 era to mid-July 2019, the time of writing.
 
 Preparation
 -----------
@@ -54,7 +54,7 @@ Here, we'll download all L2A data for the period 1st July 2018 to 2019 for the t
 
 .. note:: Data from more than 1 year in the past may have been moved to the `Long Term Archive <https://earth.esa.int/web/sentinel/news/-/article/activation-of-long-term-archive-lta-access>`_. To access this data it's necessary to order it from Copernicus, which can be a laborious task. For most practical purposes, to use dense time series you should consider running these scripts on an online platform (e.g. F-TEP, DIAS, AWS) where data are stored locally to processing infrastructure.
 
-Before contintuing, ensure that you have a directory (i.e. ``DATA``) containing a series of Sentinel-2 .SAFE files. In this case, we have data for two Sentinel-2 tiles, ``36KWC`` and ``36KWD``:
+Before contintuing, ensure that you have a directory (i.e. ``DATA``) containing a series of Sentinel-2 .SAFE files. In this case, we have data for two Sentinel-2 tiles, ``36KVD`` and ``36KWD``:
 
 .. code-block:: console
 
@@ -77,7 +77,7 @@ Training the classifier
 
 Training of the classifier is performed in two steps. 1) Extracting data from a series of training pixels of stable forest and nonforest, 2) Calibrating a classifier to separate the spectral characteristics of forest from those of nonforest.
 
-.. note:: Both extraction and calibration steps *may* be skipped for the case of tiles ``36KWC`` and ``36KWD``, as ``deforest`` is provided with a default classifier trained at this location. For all other locations, it's strongly recommended that these steps are followed.
+.. note:: Both extraction and calibration steps *may* be skipped for the case of tiles ``36KVD`` and ``36KWD``, as ``deforest`` is provided with a default classifier trained at this location. For all other locations, it's strongly recommended that these steps are followed.
 
 Extracting training data
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -227,7 +227,9 @@ Once complete, images will be output to the ``classified_images`` directory.
     S2_S2_T36KWC_20170926_075507.tif  S2_S2_T36KWD_20180906_075434.tif
     S2_S2_T36KWC_20170928_074401.tif
 
-IMAGE
+For example, this image shows forest probability in the study region for two images (36KVD: 01/10/2016, 36KWD: 26/11/2015), with pixels shown in darker green indicating a higher probability of forest fin that image.
+
+.. image:: _static/forest_prob.png
 
 Change detection
 ----------------
