@@ -3,9 +3,9 @@
 Worked example on the command line
 ==================================
 
-Here we'll show you by example how the deforest processing chain works in practice. We will focus on an example from Zambezia province of Mozambique, with the aim of producing a remote sensing product for historic deforestation and near real-time warnings of deforestation.
+Here we'll explain by example how the ``deforest`` processing chain works in practice. We will focus on an example from Manica and Manicaland provinces of Mozambique and Zimbabwe, with the aim of producing a remote sensing product for annual deforestation and near real-time warnings of tree cover change.
 
-We'll run this example in the Chimanimani region, covering Zimbabwe and Mozambique. We'll use a dense time series of two Sentinel-2 tiles, **36KWC** and **36KWD**. This location has the CRS **UTM 36S** (EPSG: 32736), and an extent of **400,000 - 600,000** m Eastings, and **7,800,000 - 7,900,000** m Northings. We'll use all data from the start of the Sentinel-2 era to mid-July 2019, the time of writing.
+The study area for this example straddles the border of Mozambique and Zimbabwe, and is appropriate as it is relatively densely forested, with high rates of forest cover change. We'll use a dense time series of two Sentinel-2 tiles, **36KWC** and **36KWD**. This location has the CRS **UTM 36S** (EPSG: 32736), and an extent of **400,000 - 600,000** m Eastings, and **7,800,000 - 7,900,000** m Northings. We'll use all data from the start of the Sentinel-2 era to mid-July 2019, the time of writing.
 
 Preparation
 -----------
@@ -16,21 +16,21 @@ Open a terminal, and use ``cd`` to navigate to the location you'd like to store 
 
 .. code-block:: console
     
-    cd /home/user/DATA
-    mkdir worked_example
-    cd worked_example
+    [user@linuxpc DATA]$ cd /home/user/DATA
+    [user@linuxpc DATA]$ mkdir worked_example
+    [user@linuxpc DATA]$ cd worked_example
 
 Use mkdir to make a separate directory to contain the data you wish to download.
 
 .. code-block:: console
     
-    mkdir DATA
+    [user@linuxpc DATA]$ mkdir DATA
     
 To begin, navigate to the DATA folder.
 
 .. code-block:: console
     
-    cd DATA
+    [user@linuxpc DATA]$ cd DATA
 
 Data preparation
 ----------------
@@ -40,19 +40,21 @@ Downloading data
 
 The first step is to download Sentinel-2 level 1C data from the `Copernicus Open Access Data Hub <https://scihub.copernicus.eu/>`_.
 
-For this we use the ``sen2mosaic`` ``download.py`` tool. See [sen2mosaic instructions] for more details.
+For this we use the ``sen2mosaic`` ``download.py`` tool, installed as part of setup for ``deforest``. See `sen2mosaic documentation <https://sen2mosaic.rtfd.io>`_ for more details.
 
 Here, we'll download all L2A data for the period 1st July 2018 to 2019 for the tile ``36KWD`` specifying a maximum cloud cover percetage of 30%:
 
 .. code-block:: console
     
-    s2m download -u user.name -p supersecret -t 36KWD -c 30 -s 20180701 -l L2A
+    [user@linuxpc DATA]$ s2m download -u user.name -p supersecret -t 36KWD -c 30 -s 20180701 -l L2A
 
-.. note::  Not all Sentinel-2 data are available in L2A format, meaning that you can either use L1C data, or preprocess data yourself with sen2cor. See `sen2mosaic <https://www.bitbucket.org/sambowers/sen2mosaic>`_ for more details.
+.. note:: Not all Sentinel-2 data are available in L2A format, meaning that you can either use L1C data, or preprocess data yourself with sen2cor. See `sen2mosaic <https://www.bitbucket.org/sambowers/sen2mosaic>`_ for more details.
+ 
+``deforest`` works using long data time series, and will perform poorly where a time series is too short. Try to ensure access to at least 3 years worth of data.
 
-.. note:: Data from more than 1 year in the past may have been moved to the `Long Term Archive <https://earth.esa.int/web/sentinel/news/-/article/activation-of-long-term-archive-lta-access>`_. To access this data it will be necessary to order it from Copernicus. For more practical purposes, to use dense time series you should consider using these scripts on an online platform (e.g. F-TEP, DIAS, AWS) to access Sentinel-2 data.
-    
-Ensure that you have at least 2 years of data before proceeding to the next step. Ensuere that you have a directory (i.e. ``DATA``) containing a series of Sentinel-2 .SAFE files:
+.. note:: Data from more than 1 year in the past may have been moved to the `Long Term Archive <https://earth.esa.int/web/sentinel/news/-/article/activation-of-long-term-archive-lta-access>`_. To access this data it's necessary to order it from Copernicus, which can be a laborious task. For most practical purposes, to use dense time series you should consider running these scripts on an online platform (e.g. F-TEP, DIAS, AWS) where data are stored locally to processing infrastructure.
+
+Before contintuing, ensure that you have a directory (i.e. ``DATA``) containing a series of Sentinel-2 .SAFE files. In this case, we have data for two Sentinel-2 tiles, ``36KWC`` and ``36KWD``:
 
 .. code-block:: console
 
@@ -75,14 +77,16 @@ Training the classifier
 
 Training of the classifier is performed in two steps. 1) Extracting data from a series of training pixels of stable forest and nonforest, 2) Calibrating a classifier to separate the spectral characteristics of forest from those of nonforest.
 
+.. note:: Both extraction and calibration steps *may* be skipped for the case of tiles ``36KWC`` and ``36KWD``, as ``deforest`` is provided with a default classifier trained at this location. For all other locations, it's strongly recommended that these steps are followed.
+
 Extracting training data
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-The first step to using the ``deforest`` algorithm is to extract training data. We perform this task with the ``deforest extract.py`` tool.
+The first step to using the ``deforest`` algorithm is to extract training data. This task is performed with the ``deforest extract.py`` tool.
 
-There are two options for specification of locations to extract training data, either using a shapefile or a raster image. In each case we need to specify the attributes of a 'forest' and a 'nonforest' pixel, and these should be associated with locations of stable forest/nonforest.
+There are two options for specification of locations to extract training data, either using a shapefile or a raster image. In each case we need to specify the attributes of a 'forest' and a 'nonforest' pixel, and these should be associated with locations of stable forest/nonforest that do not change class over the monitoring period.
 
-For ease, here we'll use a pre-existing land cover map to train our classifier (download on registration `here <http://2016africalandcover20m.esrin.esa.int/>`_). This map covers Africa at 20 m resolution, with numbered land cover classes with meaning:
+For ease, here we'll use a pre-existing land cover map to train our classifier (download on registration `here <http://2016africalandcover20m.esrin.esa.int/>`_). This map covers Africa at 20 m resolution for the year 2016, and here we'll make the assumption that these classes are accurate and do not change between 2016 - 2019. This map has numbered land cover classes with meaning:
 
 +-----------------------------------------+-------+
 | Land cover                              | Value |
@@ -110,27 +114,31 @@ For ease, here we'll use a pre-existing land cover map to train our classifier (
 | Open water                              | 10    |
 +-----------------------------------------+-------+
 
-To use this with our existing directory containing Sentinel-2 data, we can use the following command:
+To apply this to data in our existing directory containing Sentinel-2 data, we can use the following command:
 
 .. code-block:: console
     
-    deforest extract path/to/DATA/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t path/to/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -o ./ -f 1 -nf 2 3 4 5 6 7 8 10 -v
+    [user@linuxpc DATA]$ deforest extract path/to/DATA/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t path/to/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -f 1 -nf 2 3 4 5 6 7 8 10 -v
 
+This translates to extracting features from a random subset of forest (``-f``) and nonforest (``-nf``) pixels from a geotiff image (``-t``) on in each image contained within ``path/to/DATA``, with a specified resolution (``-r``), extent (``-e``) and projection (``-e``). 
+    
 If resources are limited, input training data can be limited to fewer images:
 
 .. code-block:: console
     
-    deforest extract path/to/DATA/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t path/to/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -o ./ --max_images 100 -f 1 -nf 2 3 4 5 6 7 8 10 -v
+    [user@linuxpc DATA]$ deforest extract path/to/DATA/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t path/to/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -o ./ --max_images 100 -f 1 -nf 2 3 4 5 6 7 8 10 -v
     
-If resources are available, this process can be sped up by increasing the number of processes to, for instance, to run 8 similtaneous processes:
+And if more resources are available, this process can be sped up by increasing the number of processes to, for instance, to run 8 similtaneous processes:
 
 .. code-block:: console
     
-    deforest extract path/to/DATA/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t path/to/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -o ./ -f 1 -nf 2 3 4 5 6 7 8 10 -v -p 8
+    [user@linuxpc DATA]$ deforest extract path/to/DATA/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t path/to/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -o ./ -f 1 -nf 2 3 4 5 6 7 8 10 -v -p 8
 
 Be aware, the more processes used the more computational resources will be required.
 
+We can also specify a larger number of pixels to extract from each image (default: 5000 per class) using the ``--max_pixels`` (``-mp``) option:
 
+    [user@linuxpc DATA]$ deforest extract path/to/DATA/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t path/to/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -f 1 -nf 2 3 4 5 6 7 8 10 -mp 10000 -v
 
 The output of this command will be a ``.npz`` file, which contains the pixel values for each classification feature.
 
@@ -148,7 +156,7 @@ To train the classifier, run:
 
 .. code-block:: console
     
-    deforest train S2_training_data.npz
+    [user@linuxpc DATA]$ deforest train S2_training_data.npz
 
 Once complete there will be two new files
 
@@ -173,13 +181,13 @@ We can then run the classification algorithm we just calibrated to produce proba
     
 .. code-block:: console
     
-    deforest classify path/to/DATA/ -m S2_model.pkl -r 20 -e 32736 -te 399980 7790200 609780 7900000 -o classified_images
+    [user@linuxpc DATA]$ deforest classify path/to/DATA/ -m S2_model.pkl -r 20 -e 32736 -te 399980 7790200 609780 7900000 -o classified_images
 
 If resources are available, classification can can be sped up by allocating additional processes:
     
 .. code-block:: console
     
-    deforest classify path/to/DATA/ -m S2_model.pkl -r 20 -e 32736 -te 399980 7790200 609780 7900000 -o classified_images -p 8
+    [user@linuxpc DATA]$ deforest classify path/to/DATA/ -m S2_model.pkl -r 20 -e 32736 -te 399980 7790200 609780 7900000 -o classified_images -p 8
 
 Once complete, images will be output to the ``classified_images`` directory.
 
@@ -209,7 +217,7 @@ The final step is to combine these classified images into an estimate of forest 
 
 .. code-block:: console
     
-    deforest change classified_images/*.tif
+    [user@linuxpc DATA]$ deforest change classified_images/*.tif
 
 This process will output two images:
 
