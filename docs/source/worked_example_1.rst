@@ -178,7 +178,6 @@ Once complete there will be two new files:
 
 .. image:: _static/S2_quality_assessment.png
 
-
 For help in interpretation of this figure, see **MODEL QUALITY ASSESSMENT** (to follow).
 
 Classifing the data
@@ -191,16 +190,24 @@ First, we'll make a new directory to store classified images:
     [user@linuxpc directory]$ mkdir classified_images
 
 We can then run the classification algorithm we just calibrated to produce probability of forest for each image. This operates very similarly to ``training.py``, here we'll use the same output extents:
-    
+
 .. code-block:: console
     
     [user@linuxpc DATA]$ deforest classify path/to/DATA/ -m S2_model.pkl -r 20 -e 32736 -te 399980 7790200 609780 7900000 -o classified_images
+
+This translates to classifying images contained within ``path/to/DATA`` using a trained classifier (``-m``), with a specified output resolution (``-r``), extent (``-e``) and projection (``-e``), and outputing classified images to a directory (``-o``).
+
+.. note:: If you chose not to extract pixels based on your own data or calibrate your own model, omit the ``-m S2_model.pkl`` option to use a default model.
 
 If resources are available, classification can can be sped up by allocating additional processes:
     
 .. code-block:: console
     
     [user@linuxpc DATA]$ deforest classify path/to/DATA/ -m S2_model.pkl -r 20 -e 32736 -te 399980 7790200 609780 7900000 -o classified_images -p 8
+
+If you do not have access to preprocessed L2A Sentinel-2 images, L1C data can be input using the ``-l`` option:
+
+    [user@linuxpc DATA]$ deforest classify path/to/DATA/ -m S2_model.pkl -r 20 -e 32736 -te 399980 7790200 609780 7900000 -o classified_images -l 1C
 
 Once complete, images will be output to the ``classified_images`` directory.
 
@@ -219,7 +226,6 @@ Once complete, images will be output to the ``classified_images`` directory.
     ...                               ...
     S2_S2_T36KWC_20170926_075507.tif  S2_S2_T36KWD_20180906_075434.tif
     S2_S2_T36KWC_20170928_074401.tif
-
 
 IMAGE
 
