@@ -207,6 +207,8 @@ If resources are available, classification can can be sped up by allocating addi
 
 If you do not have access to preprocessed L2A Sentinel-2 images, L1C data can be input using the ``-l`` option:
 
+.. code-block:: console
+   
     [user@linuxpc DATA]$ deforest classify path/to/DATA/ -m S2_model.pkl -r 20 -e 32736 -te 399980 7790200 609780 7900000 -o classified_images -l 1C
 
 Once complete, images will be output to the ``classified_images`` directory.
@@ -227,7 +229,7 @@ Once complete, images will be output to the ``classified_images`` directory.
     S2_S2_T36KWC_20170926_075507.tif  S2_S2_T36KWD_20180906_075434.tif
     S2_S2_T36KWC_20170928_074401.tif
 
-For example, this image shows forest probability in the study region for two images (36KVD: 01/10/2016, 36KWD: 26/11/2015), with pixels shown in darker green indicating a higher probability of forest fin that image.
+For example, this image shows forest probability in the study region for two images (``36KVD``: 01/10/2016, ``36KWD``: 26/11/2015), with pixels shown in darker green indicating a higher probability of forest fin that image.
 
 .. image:: _static/forest_prob.png
 
