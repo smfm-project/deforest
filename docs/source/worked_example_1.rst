@@ -138,6 +138,8 @@ Be aware, the more processes used the more computational resources will be requi
 
 We can also specify a larger number of pixels to extract from each image (default: 5000 per class) using the ``--max_pixels`` (``-mp``) option:
 
+.. code-block:: console
+    
     [user@linuxpc DATA]$ deforest extract path/to/DATA/ -r 20 -e 32736 -te 399980 7790200 609780 7900000 -t path/to/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif -f 1 -nf 2 3 4 5 6 7 8 10 -mp 10000 -v
 
 The output of this command will be a ``.npz`` file, which contains the pixel values for each classification feature.
@@ -150,15 +152,21 @@ The output of this command will be a ``.npz`` file, which contains the pixel val
 Calibrating the classifier
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The next step it to use this training data to calibrate the classifier of forest cover. This is performed with the ``deforest train.py`` tool.
+The next step it to use this training data to calibrate the classifier of forest cover. This is performed with the ``deforest`` ``train.py`` tool. This tool takes the feature values from ``extract.py`` to train a classifier of forest/nonforest based on those feature values.
 
-To train the classifier, run:
+To train the classifier, run the command:
 
 .. code-block:: console
     
     [user@linuxpc DATA]$ deforest train S2_training_data.npz
 
-Once complete there will be two new files
+To increase the complexity of the classifier, a larger number of pixel values from be subsampled from the input data (default = 100,000 pixels). For example, to train the model based on 200,000 pixels:
+
+.. code-block:: console
+    
+    [user@linuxpc DATA]$ deforest train S2_training_data.npz -m 200000
+
+Once complete there will be two new files:
 
 .. code-block:: console
 
@@ -166,7 +174,12 @@ Once complete there will be two new files
     S2_model.pkl
     S2_quality_assessment.png
 
-``S2_model.pkl`` is an object that defines the classifier, ``S2_quality_assessment.png`` can be used to assess the quality of the model. See **MODEL QUALITY ASSESSMENT** (to follow).
+``S2_model.pkl`` is an object that defines the calibrated classifier, ``S2_quality_assessment.png`` can be used to assess the quality of the model.
+
+.. image:: _static/S2_quality_assessment.png
+
+
+For help in interpretation of this figure, see **MODEL QUALITY ASSESSMENT** (to follow).
 
 Classifing the data
 -------------------
