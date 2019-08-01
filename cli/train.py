@@ -48,7 +48,7 @@ if __name__ == '__main__':
     # Required arguments
     
     # Optional arguments
-    optional.add_argument('-m', '--max_samples', type = int, metavar = 'N', default = 100000, help = "Maximum number of samples to train the classifier with. Smaller sample sizes will run faster and produce a simpler model, possibly at the cost of predictive power.")
+    optional.add_argument('-m', '--max_samples', type = int, metavar = 'N', default = 100000, help = "Maximum number of samples to train the classifier with. Smaller sample sizes will run faster and produce a simpler model, possibly at the cost of predictive power. Defaults to 100,000 points.")
     optional.add_argument('-n', '--output_name', type=str, metavar = 'NAME', default = None, help="Specify a string to precede output filename. Defaults to name of input training data.")
     optional.add_argument('-o', '--output_dir', type = str, metavar = 'PATH', default = os.getcwd(), help = "Directory to save the classifier. Defaults to the current working directory.")
         

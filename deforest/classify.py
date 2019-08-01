@@ -44,13 +44,14 @@ def getCfgDir():
 ####################
 
 
-def loadFeatures(scene, md = None):
+def loadFeatures(scene, md = None, output = False, output_dir = os.getcwd()):
     """
     Calculate a range of vegetation features given .SAFE file and resolution.
     
     Args:
         scene: A sen2mosaic.core.LoadScene() object
         md: A sen2mosaic.core.Metadata() object. Defaults to 'None', which takes the extent of the input file.
+        output: Set True to output all features to GeoTiffs
     
     Returns:
         A maked numpy array of 20 vegetation features for predicting forest/nonforest probabilities.
@@ -86,6 +87,19 @@ def loadFeatures(scene, md = None):
     
     # Tidy up residual nodata values
     features[np.logical_or(np.isinf(features), np.isnan(features))] = 0.
+    
+    # Optionally output features to GeoTiffs
+    feature_names = ['NDVI', 'EVI', 'GEMI', 'NDMI', 'SAVI', 'RENDVI', 'MSI', 'NBR', 'MIRBI',
+                    'PC600', 'PC1200', 'PC9600', 'PC38400', 'CLAHE2400', 'CLAHE4800',
+                    'STD3', 'STD9', 'COEFVAR', 'SIN', 'COS']
+    if output:
+        
+        for n, feature in enumerate(feature_names):
+            
+            ds = sen2mosaic.IO.createGdalDataset(md, data_out = features[:,:,n].filled(-9999.), filename = getOutputName(scene, output_dir = output_dir, output_name = feature), nodata = -9999., driver='GTiff', dtype = gdal.GDT_Float32, options=['COMPRESS=LZW'])
+        
+                
+
     
     return features
 

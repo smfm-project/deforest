@@ -39,7 +39,7 @@ def _classify_all(input_list):
     Multiprocessing requires some gymnastics. This is a wrapper function to exexute classify_all() using a single input expressed as a list.
     
     Args:
-        input_list: List containing [source_file, target_extent, resolution, EPSG_code, output_dir, output_name]
+        input_list: List containing [source_file, target_extent, resolution, EPSG_code, output_dir, output_name, output_features]
     '''
     
     source_file = input_list[0]
@@ -49,6 +49,7 @@ def _classify_all(input_list):
     model = input_list[4]
     output_dir = input_list[5]
     output_name = input_list[6]
+    output_features = input_list[7]
         
     md_dest = sen2mosaic.core.Metadata(target_extent, resolution, EPSG_code)
     
@@ -56,10 +57,10 @@ def _classify_all(input_list):
         
     scene = sen2mosaic.core.LoadScene(source_file, resolution = res_S2)
         
-    classify_all([scene], md_dest, model = model, output_dir = output_dir, output_name = output_name)
+    classify_all([scene], md_dest, model = model, output_dir = output_dir, output_name = output_name, output_features = output_features)
 
 
-def classify_all(scenes, md_dest, model = deforest.classify.getCfgDir()+'/S2_model.pkl', output_dir = os.getcwd(), output_name = 'classified'):
+def classify_all(scenes, md_dest, model = deforest.classify.getCfgDir()+'/S2_model.pkl', output_dir = os.getcwd(), output_name = 'classified', output_features = False):
     '''
     Classify a list of Sentinel-2 scenes
     
@@ -74,7 +75,7 @@ def classify_all(scenes, md_dest, model = deforest.classify.getCfgDir()+'/S2_mod
     for scene in scenes:
                 
         print('Doing %s'%scene.granule)
-        features = deforest.classify.loadFeatures(scene, md = md_dest)
+        features = deforest.classify.loadFeatures(scene, md = md_dest, output = output_features, output_dir = output_dir)
                     
         # Classify the image
         p_forest = deforest.classify.classify(features, model)
@@ -83,7 +84,7 @@ def classify_all(scenes, md_dest, model = deforest.classify.getCfgDir()+'/S2_mod
         ds = sen2mosaic.IO.createGdalDataset(md_dest, data_out = p_forest.filled(255), filename = getOutputName(scene, output_dir = output_dir, output_name = output_name), nodata = 255, driver='GTiff', dtype = gdal.GDT_Byte, options=['COMPRESS=LZW'])
         
 
-def main(source_files, target_extent, resolution, EPSG_code, n_processes = 1, model = deforest.classify.getCfgDir()+'/S2_model.pkl', output_dir = os.getcwd(), output_name = 'classified', level = '2A'):
+def main(source_files, target_extent, resolution, EPSG_code, n_processes = 1, model = deforest.classify.getCfgDir()+'/S2_model.pkl', output_dir = os.getcwd(), output_name = 'classified', level = '2A', output_features = False):
     """
     Classify a list of Sentinel-2 input files to forest/nonforest probabilities, reproject and output to GeoTiffs.
     
@@ -95,6 +96,7 @@ def main(source_files, target_extent, resolution, EPSG_code, n_processes = 1, mo
         n_processes: Number of processes, defaults to 1.
         output_dir: Directory to output classifier predictors. Defaults to current working directory.
         output_name: Name to precede output file. Defaults to 'processed'. 
+        output_features: Output all features as GeoTiffs. Not generally recommended.
         
     """
     
@@ -118,12 +120,12 @@ def main(source_files, target_extent, resolution, EPSG_code, n_processes = 1, mo
     
     # Classify
     if n_processes == 1:
-        classify_all(scenes, md_dest, model = model, output_dir = output_dir, output_name = output_name)
+        classify_all(scenes, md_dest, model = model, output_dir = output_dir, output_name = output_name, output_features = output_features)
     
     # Classify in parallel
     elif n_processes > 1:
         instances = multiprocessing.Pool(n_processes)
-        instances.map(_classify_all, [[scene.granule, target_extent, resolution, EPSG_code, model,  output_dir, output_name] for scene in scenes])
+        instances.map(_classify_all, [[scene.granule, target_extent, resolution, EPSG_code, model,  output_dir, output_name, output_features] for scene in scenes])
         instances.close()
     
 
@@ -155,12 +157,14 @@ if __name__ == '__main__':
     optional.add_argument('-n', '--output_name', type=str, metavar = 'NAME', default = 'S2', help="Specify a string to precede output filename. Defaults to 'S2'.")
     optional.add_argument('-o', '--output_dir', type=str, metavar = 'DIR', default = os.getcwd(), help="Optionally specify an output directory")
     
+    # Hidden arguments (output all feature GeoTiffs. For visualisation only, large data volumes!)
+    optional.add_argument('--output_features', action = 'store_true', default = False, help=argparse.SUPPRESS)
     
     # Get arguments
     args = parser.parse_args()
         
     # Execute script
-    main(args.infiles, args.target_extent, args.resolution, args.epsg,n_processes = args.n_processes, model = args.model, output_dir = args.output_dir, output_name = args.output_name, level = args.level)
+    main(args.infiles, args.target_extent, args.resolution, args.epsg,n_processes = args.n_processes, model = args.model, output_dir = args.output_dir, output_name = args.output_name, level = args.level, output_features = args.output_features)
     
     # Examples
     
