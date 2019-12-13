@@ -4,9 +4,10 @@ Using deforest on the command line
 Downloading and Preprocessing Data
 ----------------------------------
 
-Instructions for downloaded and pre-processing data from Sentinel-2 can be found at `sen2mosaic <https://bitbucket.org/sambowers/sen2mosaic/>_`.
+Instructions for downloaded and pre-processing data from Sentinel-2 can be found at `sen2mosaic <https://bitbucket.org/sambowers/sen2mosaic/>`_.
 
-Note that SMFM deforest is designed for analysis of dense time series of Sentinel-2 data, which will require access to subsantial file storage and processing power. We recommend use of a cloud platform, where data do not have to downloaded of pre-processed on a local machine. See, for example, the 'Data and Information Access Services' (`DIAS <https://www.copernicus.eu/en/access-data/dias>_`) platforms that provide centralised access to Copernicus data.
+.. NOTE::
+    SMFM deforest is designed for analysis of dense time series of Sentinel-2 data, which will require access to subsantial file storage and processing power. We recommend use of a cloud platform, where data do not have to downloaded of pre-processed on a local machine. See, for example, the 'Data and Information Access Services' (`DIAS <https://www.copernicus.eu/en/access-data/dias>`_) platforms that provide centralised access to Copernicus data.
 
 Calibrating SMFM deforest
 -------------------------
