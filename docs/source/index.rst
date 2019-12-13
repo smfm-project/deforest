@@ -8,7 +8,7 @@ Welcome to deforest's documentation!
 
 The DEnse FOREst Time Series (DEFOREST) tool is a method for detecting changes in forest cover in a time series of Sentinel-2 data.
 
-The processing chain:
+The processing chain does the following:
 
 * Takes Sentinel-2 data (L1C/L2A) as input.
 * Trains a model to robustly identify forest/nonforest across any phenological state.

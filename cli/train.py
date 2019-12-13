@@ -11,7 +11,7 @@ def main(data, max_samples = 100000, output_name = 'S2', output_dir = deforest.t
     Train a random forest model to predict the probability of forest/nonforest given data fextracted from imagery by extract_training_data.py.
     
     Args:
-        data: A .npz file from extract_training_data.py
+        data: A .npz file from extract.py
         max_samples: Maximum number of pixels to use in training the classifier
         output_dir: Directory to save the calibrated model. Defaults to deforest/cfg/.
     '''

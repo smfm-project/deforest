@@ -51,7 +51,7 @@ if __name__ == '__main__':
     optional = parser.add_argument_group('optional arguments')
 
     # Required arguments
-    required.add_argument('infiles', metavar = 'FILES', type = str, nargs = '+', help = 'A list of files output by classify.py, including wildcards where desired.')
+    required.add_argument('infiles', metavar = 'FILES', type = str, nargs = '+', help = 'A list of files output by classify.py, specifying multiple files using wildcards.')
     
     # Optional arguments
     optional.add_argument('-t', '--threshold', metavar = 'N', type = float, default = 0.99, help = 'Set a threshold probability to identify deforestation (between 0 and 1). High thresholds are more strict in the identification of deforestation. Defaults to 0.99.')

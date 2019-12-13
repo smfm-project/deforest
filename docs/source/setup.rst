@@ -9,8 +9,10 @@ This toolset is written for use in Linux.
 You will need access to a PC or server with at least:
 
 * Python 3
-* `sen2mosaic <https://bitbucket.org/sambowers/sen2mosaic/>`
+* SMFM `sen2mosaic <https://bitbucket.org/sambowers/sen2mosaic/>_`
 * 8 GB of RAM for classification
+
+Note that processing of large volumes of Sentinel-2 data will require access substantial file storage and processing power. For user over large areas we advice use of a Linux server orsuitably equipped cloud platform.
 
 Installing Anaconda Python
 --------------------------
@@ -24,7 +26,7 @@ To install Anaconda Python, open a terminal window, change directory to the loca
     wget https://repo.anaconda.com/archive/Anaconda3-2019.03-Linux-x86_64.sh
     chmod +x Anaconda3-2019.03-Linux-x86_64.sh
     ./Anaconda3-2019.03-Linux-x86_64.sh
-
+    
 If this has functioned, on executing ``python`` in a terminal window, you should see the following:
 
 .. code-block:: console
