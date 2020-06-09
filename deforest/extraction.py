@@ -175,8 +175,8 @@ def extractData(scenes, training_data, md_dest, forest_values, nonforest_values,
                 continue
             
             if training_data.split('.')[-1] == 'shp':
-                forest_mask = sen2mosaic.IO.loadShapefile(training_data, md_dest, field = field, field_value = forest_values)
-                nonforest_mask = sen2mosaic.IO.loadShapefile(training_data, md_dest, field = field, field_value = nonforest_values)
+                forest_mask = sen2mosaic.IO.loadShapefile(training_data, md_dest, field = field, field_values = forest_values)
+                nonforest_mask = sen2mosaic.IO.loadShapefile(training_data, md_dest, field = field, field_values = nonforest_values)
                 
             elif training_data.split('.')[-1] in ['tif', 'tiff', 'vrt']:
                 
