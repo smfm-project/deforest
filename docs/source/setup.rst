@@ -9,7 +9,7 @@ This toolset is written for use in Linux.
 You will need access to a PC or server with at least:
 
 * Python 3
-* SMFM `sen2mosaic <https://bitbucket.org/sambowers/sen2mosaic/>_`
+* SMFM `sen2mosaic <https://github.com/smfm-project/sen2mosaic/>_`
 * 8 GB of RAM for classification
 
 Note that processing of large volumes of Sentinel-2 data will require access substantial file storage and processing power. For user over large areas we advice use of a Linux server orsuitably equipped cloud platform.
@@ -56,11 +56,11 @@ Activate the ``deforest`` environment whenever opening a new terminal window by 
 Installing sen2mosaic
 ---------------------
 
-If you've not already installed it, sen2mosaic can be downloaded to a machine from its `repository <https://bitbucket.org/sambowers/sen2mosaic/>`_ . To do this, open a terminal window and input:
+If you've not already installed it, sen2mosaic can be downloaded to a machine from its `repository <https://github.com/smfm-project/deforest>`_ . To do this, open a terminal window and input:
 
 .. code-block:: console
 
-    git clone https://sambowers@bitbucket.org/sambowers/sen2mosaic.git
+    git clone https://github.com/smfm-project/sen2mosaic.git
 
 To install sen2mosaic, navigate to the sen2mosaic directory and run the following *within your sen2mosaic environment*.
 
@@ -75,7 +75,7 @@ Open a terminal window and input:
 
 .. code-block:: console
 
-    git clone https://sambowers@bitbucket.org/sambowers/deforest.git
+    git clone https://github.com/smfm-project/deforest.git
 
 To install deforest, navigate to the deforest directory and run the following *within your deforest environment*.
 
