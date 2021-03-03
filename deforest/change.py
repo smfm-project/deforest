@@ -262,7 +262,7 @@ def calculateDeforestation(infiles, deforestation_threshold = 0.99, block_weight
     return confirmed_deforestation, warning_deforestation
 
 
-def outputImage(array, image_like, filename):
+def outputImage(array, image_like, filename, dtype = 6):
     '''
     Output a numpy array to a GeoTiff using an example projected image.
     
@@ -270,11 +270,12 @@ def outputImage(array, image_like, filename):
         array: A numpy array
         image_like: Path to a GDAL-compatible raste file of the same CRS as array
         filename: Output filename
+        dtype: GDAL data type
     '''
     
     data_ds = gdal.Open(image_like)
     gdal_driver = gdal.GetDriverByName('GTiff')
-    ds = gdal_driver.Create(filename, data_ds.RasterXSize, data_ds.RasterYSize, 1, 6, options = ['COMPRESS=LZW'])
+    ds = gdal_driver.Create(filename, data_ds.RasterXSize, data_ds.RasterYSize, 1, dtype, options = ['COMPRESS=LZW'])
     ds.SetGeoTransform(data_ds.GetGeoTransform())
     ds.SetProjection(data_ds.GetProjection())
     ds.GetRasterBand(1).WriteArray(array)
