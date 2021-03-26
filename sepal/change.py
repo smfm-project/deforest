@@ -31,7 +31,7 @@ def _bayesUpdate(prior, likelihood, scale_factor = 10000):
 
 
 
-def calculateDeforestation(stack_file, dates_file, deforestation_threshold = 0.99, block_weight = 0.1, scale_factor = 10000):
+def calculateDeforestation(stack_file, dates_file, deforestation_threshold = 0.99, block_weight = 0.1, date_range = ['01-01', '12-31'], scale_factor = 10000):
     '''
     '''
     
@@ -51,7 +51,10 @@ def calculateDeforestation(stack_file, dates_file, deforestation_threshold = 0.9
     
 
     for n, date in enumerate(dates):
-       
+        if date.date() > dt.date(date.year, int(date_range[0].split('-')[0]), int(date_range[0].split('-')[1])): continue
+        if date.date() < dt.date(date.year, int(date_range[1].split('-')[0]), int(date_range[1].split('-')[1])): continue
+         
+        #print(date.date(), dt.date(date.year, int(date_range[0].split('-')[0]), int(date_range[0].split('-')[1])))
         PF = ds.GetRasterBand(n+1).ReadAsArray().astype(np.int16)
         PNF = scale_factor - PF
 
@@ -107,7 +110,7 @@ def calculateDeforestation(stack_file, dates_file, deforestation_threshold = 0.9
 
     
     
-def main(source_dir, deforestation_threshold = 0.99, block_weight = 0.1, output_dir = os.getcwd(), output_name = 'SMFMDeforest'):
+def main(source_dir, deforestation_threshold = 0.99, block_weight = 0.1, date_range = ['01-01', '12-31'], output_dir = os.getcwd(), output_name = 'SMFMDeforest'):
     '''
     Process a list of probability maps to generate a map of deforestation year and warning estimates of upcoming events. Outputs a GeoTiff of confirmed deforestation years and warnings of deforestation.
     
@@ -115,6 +118,7 @@ def main(source_dir, deforestation_threshold = 0.99, block_weight = 0.1, output_
         source_dir: A time series directory from SEPAL
         deforestation_threshold: Threshold probability for flagging deforestation. Defaults to 0.99. Must be between > 0.5 an < 1.0.
         block_weight: Limits the probability range of input files. For example, default block_weight 0.1 allows of a probability range of 0.1 to 0.9 in input files. This reduces the probability of false positives.
+        date_range: Two inputs that define the first and last acceptable MM-DD to include images. Can be used to exclude the dry season where predictions are poor.
         output_dir = Directory to output GeoTiffs
         output_name = String to prepend to output images
         '''
@@ -124,7 +128,7 @@ def main(source_dir, deforestation_threshold = 0.99, block_weight = 0.1, output_
     dates_file = os.path.abspath(source_dir) + '/dates.csv'
     
     # Run through images to identify changes
-    deforestation_confirmed, deforestation_warning = calculateDeforestation(stack_file, dates_file, deforestation_threshold = deforestation_threshold, block_weight = block_weight)
+    deforestation_confirmed, deforestation_warning = calculateDeforestation(stack_file, dates_file, deforestation_threshold = deforestation_threshold, block_weight = block_weight, date_range = date_range)
  
     # Output images
     deforest.change.outputImage(deforestation_confirmed, stack_file, '%s/%s_%s.tif'%(output_dir, output_name, 'confirmed'), dtype = gdal.GDT_Int16)
@@ -148,11 +152,12 @@ if __name__ == '__main__':
     # Optional arguments
     optional.add_argument('-t', '--threshold', metavar = 'N', type = float, default = 0.99, help = 'Set a threshold probability to identify deforestation (between 0 and 1). High thresholds are more strict in the identification of deforestation. Defaults to 0.99.')
     optional.add_argument('-b', '--block_weight', metavar = 'N', type = float, default = 0.1, help = 'Set a block weighting threshold to limit the range of forest/nonforest probabilities. Set to 0 for no block-weighting. Parameter cannot be set higher than 0.5. Defaults to 0.1.')
+    optional.add_argument('-d', '--date_range', metavar = 'MM-DD', nargs=2, type = str, default = ['01-01', '12-31'], help = "Optionally limit input to images between MM-DD. e.g. -d 11-30 04-30 for November - April inputs only.")
     optional.add_argument('-o', '--output_dir', type=str, metavar = 'DIR', default = os.getcwd(), help="Optionally specify an output directory. If nothing specified, downloads will output to the present working directory, given a standard filename.")
     optional.add_argument('-n', '--output_name', type=str, metavar = 'NAME', default = 'SMFMDeforest', help="Optionally specify a string to precede output filename. Defaults to the same as input files.")
     
     # Get arguments
     args = parser.parse_args()
 
-    main(args.source_dir, deforestation_threshold = args.threshold, block_weight = args.block_weight, output_dir = args.output_dir, output_name = args.output_name)
+    main(args.source_dir, deforestation_threshold = args.threshold, block_weight = args.block_weight, date_range = args.date_range, output_dir = args.output_dir, output_name = args.output_name)
     
