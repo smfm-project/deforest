@@ -1,0 +1,15 @@
+<VRTDataset rasterXSize="512" rasterYSize="512">
+  <SRS dataAxisToSRSAxisMapping="2,1">GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AXIS["Latitude",NORTH],AXIS["Longitude",EAST],AUTHORITY["EPSG","4326"]]</SRS>
+  <GeoTransform>  3.3208739760273652e+01,  2.6949458523585647e-04,  0.0000000000000000e+00, -1.9632411039846907e+01,  0.0000000000000000e+00, -2.6949458523585647e-04</GeoTransform>
+  <VRTRasterBand dataType="Float64" band="1">
+    <Description>2013-06-24</Description>
+    <NoDataValue>0</NoDataValue>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1" shared="0">../chunk-2013-04-01_2013-07-01/Time_series_2021-03-24_10-53-03_0_2013-04-01_2013-07-01-0000000000-0000000000.tif</SourceFilename>
+      <SourceBand>5</SourceBand>
+      <SourceProperties RasterXSize="512" RasterYSize="512" DataType="Float64" BlockXSize="256" BlockYSize="256" />
+      <SrcRect xOff="0" yOff="0" xSize="512" ySize="512" />
+      <DstRect xOff="0" yOff="0" xSize="512" ySize="512" />
+    </SimpleSource>
+  </VRTRasterBand>
+</VRTDataset>
