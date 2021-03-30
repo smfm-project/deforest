@@ -53,7 +53,7 @@ def _testIfWithinDateRange(date, date_range):
     return True
 
 
-def calculateDeforestation(stack_file, dates_file, deforestation_threshold = 0.99, block_weight = 0.1, date_range = ['01-01', '12-31'], scale_factor = 10000):
+def calculateDeforestation(stack_file, dates_file, deforestation_threshold = 0.99, block_weight = 0.1, date_range = ['01-01', '12-31'], scale_factor = 10000, verbose = False):
     '''
     '''
     
@@ -75,7 +75,7 @@ def calculateDeforestation(stack_file, dates_file, deforestation_threshold = 0.9
         
         if _testIfWithinDateRange(date, date_range) == False: continue
         
-        #print(date)
+        if verbose: print("Doing %s"%str(date.date()))
         PF = ds.GetRasterBand(n+1).ReadAsArray().astype(np.float32) / scale_factor
         PNF = 1. - PF
 
@@ -100,10 +100,9 @@ def calculateDeforestation(stack_file, dates_file, deforestation_threshold = 0.9
         
         # Case B: There is a warning in place, but no confirmation. Update pchange using PNF
         sel = warning & (deforestation == False) & (mask == False)
-        y=200;x=200#y=500;x=600
-        if mask[y,x] == False: print('Before:',pchange[y,x], PNF[y,x], deforestation[y,x])
+        #if mask[y,x] == False: print('Before:',pchange[y,x], PNF[y,x], deforestation[y,x]) #Debug
         pchange[sel] = _bayesUpdate(pchange[sel], PNF[sel])
-        if mask[y,x] == False: print('After:',pchange[y,x], PNF[y,x], deforestation[y,x])
+        #if mask[y,x] == False: print('After:',pchange[y,x], PNF[y,x], deforestation[y,x])  #Debug
 
         # Step 3: Reject or accept warnings
 
@@ -114,7 +113,6 @@ def calculateDeforestation(stack_file, dates_file, deforestation_threshold = 0.9
         # Tidy up
         deforestation_date[sel] = dt.date(1970,1,1)
         pchange[sel] = 0
-        #print(str(PF[500,600]).zfill(5),str(pchange[500,600]).zfill(5),flag[500,600],deforestation[500,600], mask[500,600])
 
         # Case B: Confirm warning where pchange > deforestation_threshold
         sel = warning & (deforestation == False) & (pchange >= deforestation_threshold) & (mask == False)
@@ -137,7 +135,7 @@ def calculateDeforestation(stack_file, dates_file, deforestation_threshold = 0.9
 
     
     
-def main(source_dir, deforestation_threshold = 0.99, block_weight = 0.1, scale_factor = 10000, date_range = ['01-01', '12-31'], output_dir = os.getcwd(), output_name = 'SMFMDeforest'):
+def main(source_dir, deforestation_threshold = 0.99, block_weight = 0.1, scale_factor = 10000, date_range = ['01-01', '12-31'], output_dir = os.getcwd(), output_name = 'SMFMDeforest', verbose = False):
     '''
     Process a list of probability maps to generate a map of deforestation year and warning estimates of upcoming events. Outputs a GeoTiff of confirmed deforestation years and warnings of deforestation.
     
@@ -155,9 +153,10 @@ def main(source_dir, deforestation_threshold = 0.99, block_weight = 0.1, scale_f
     dates_file = os.path.abspath(source_dir) + '/dates.csv'
     
     # Run through images to identify changes
-    deforestation_confirmed, deforestation_warning = calculateDeforestation(stack_file, dates_file, deforestation_threshold = deforestation_threshold, block_weight = block_weight, scale_factor = scale_factor, date_range = date_range)
+    deforestation_confirmed, deforestation_warning = calculateDeforestation(stack_file, dates_file, deforestation_threshold = deforestation_threshold, block_weight = block_weight, scale_factor = scale_factor, date_range = date_range, verbose = verbose)
  
     # Output images
+    if verbose: print("Outputting maps")
     deforest.change.outputImage(deforestation_confirmed, stack_file, '%s/%s_%s.tif'%(output_dir, output_name, 'confirmed'), dtype = gdal.GDT_Float32)
     deforest.change.outputImage(deforestation_warning,   stack_file, '%s/%s_%s.tif'%(output_dir, output_name, 'warning'),   dtype = gdal.GDT_Float32)
 
@@ -183,9 +182,10 @@ if __name__ == '__main__':
     optional.add_argument('-d', '--date_range', metavar = 'MM-DD', nargs=2, type = str, default = ['01-01', '12-31'], help = "Optionally limit input to images between MM-DD. e.g. -d 11-30 04-30 for November - April inputs only.")
     optional.add_argument('-o', '--output_dir', type=str, metavar = 'DIR', default = os.getcwd(), help="Optionally specify an output directory. If nothing specified, downloads will output to the present working directory, given a standard filename.")
     optional.add_argument('-n', '--output_name', type=str, metavar = 'NAME', default = 'SMFMDeforest', help="Optionally specify a string to precede output filename. Defaults to the same as input files.")
+    optional.add_argument('-v', '--verbose', action='store_true', default = False, help="Make script verbose.")
     
     # Get arguments
     args = parser.parse_args()
 
-    main(args.source_dir, deforestation_threshold = args.threshold, block_weight = args.block_weight, scale_factor = args.scale_factor, date_range = args.date_range, output_dir = args.output_dir, output_name = args.output_name)
+    main(args.source_dir, deforestation_threshold = args.threshold, block_weight = args.block_weight, scale_factor = args.scale_factor, date_range = args.date_range, output_dir = args.output_dir, output_name = args.output_name, verbose = args.verbose)
     
