@@ -157,8 +157,8 @@ def main(source_dir, deforestation_threshold = 0.99, block_weight = 0.1, scale_f
  
     # Output images
     if verbose: print("Outputting maps")
-    deforest.change.outputImage(deforestation_confirmed, stack_file, '%s/%s_%s.tif'%(output_dir, output_name, 'confirmed'), dtype = gdal.GDT_Float32)
-    deforest.change.outputImage(deforestation_warning,   stack_file, '%s/%s_%s.tif'%(output_dir, output_name, 'warning'),   dtype = gdal.GDT_Float32)
+    deforest.change.outputImage(deforestation_confirmed, stack_file, '%s/%s_%s.tif'%(output_dir, output_name, 'confirmed'))
+    deforest.change.outputImage(deforestation_warning,   stack_file, '%s/%s_%s.tif'%(output_dir, output_name, 'warning'))
 
 
 if __name__ == '__main__':
